@@ -1,7 +1,4 @@
-%global commit       6a45c632a0865b97dc67590ee5dd7cd6b261056c
-%global gittag       6.1.0.168
-%global shortcommit  %(c=%{commit}; echo ${c:0:7})
-%define spec_release 18
+%define spec_release 1
 #
 #
 #
@@ -10,9 +7,9 @@ Name: vdo
 Version: 6.1.0.168
 Release: %{spec_release}
 License: GPLv2
-Source0: https://github.com/dm-vdo/%{name}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
+Source: %{name}-%{version}.tgz
 URL: http://github.com/dm-vdo/vdo
-Distribution: RHEL 7.5
+Distribution: RHEL 7.3
 Requires: PyYAML >= 3.10
 Requires: kmod-kvdo >= 6.1
 Requires: lvm2 >= 2.02.171
@@ -43,7 +40,7 @@ block-level deduplication, compression, and thin provisioning.
 This package provides the user-space management tools for VDO.
 
 %prep
-%setup -n %{name}-%{commit}
+%setup -q
 
 %build
 make
@@ -190,140 +187,5 @@ systemctl disable vdo.service || :
 
 
 %changelog
-* Sun Apr 29 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.0.168-18
-- Bumped NVR for z-stream candidate
-
-* Sun Apr 29 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.0.168-17
-- Updated source to use GitHub
-- Fixed bug where VDO would always be created with a dense index even when
-  a sparse index was requested.
-- Resolves: rhbz#1572496
-
-* Fri Feb 16 2018 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.149-16
-- Sync mode is safe if underlying storage changes to requiring flushes
-- Resolves: rhbz#1540777
-
-* Wed Feb 07 2018 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.146-16
-- VDO start command now does index memory checking
-- Module target is now "vdo" instead of "dedupe"
-- VDO remove with no device no longer puts a spurious file in /dev
-- ANsible module no longer fails on modification operations
-- Resolves: rhbz#1510567
-- Resolves: rhbz#1530358
-- Resolves: rhbz#1535597
-- Resolves: rhbz#1536214
-
-* Tue Feb 06 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.0.144-16
-- Updated summary and description
-- Resolves: rhbz#1541409
-
-* Thu Feb 01 2018 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.130-15
-- vdo growLogical by less than 4K gives correct error
-- Fix URL to point to GitHub tree
-- Resolves: rhbz#1532653
-- Resolves: rhbz#1539059
-
-* Fri Jan 19 2018 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.124-14
-- Added a specific error for less than 1 block growLogical.
-- Resolves: rhbz#1532653
-
-* Wed Jan 10 2018 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.114-14
-- VDO automatically chooses the proper write policy by default
-- Package uninstall removes vdo.service symlinks
-- Resolves: rhbz#1525305
-- Resolves: rhbz#1531047
-
-* Thu Dec 21 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.106-13
-- Handle bogus --confFile and --logfile arguments
-- Produce more informative vdo manager high-level help
-- Generate command-specific unrecognized argument messages
-- Resolves: rhbz#1520927
-- Resolves: rhbz#1522750
-- Resolves: rhbz#1525560
-
-* Tue Dec 12 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.97-13
-- Remove vdo --noRun option
-- Clean up vdo error handling
-- Prevent python stack traces on vdo errors
-- Add more bounds checking to indexMem
-- Resolves: rhbz#1508544
-- Resolves: rhbz#1508918
-- Resolves: rhbz#1520991
-- Resolves: rhbz#1522754
-
-* Fri Dec 08 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.89-13
-- Build changes for UUID
-- Limit VDO physical size
-- Limit command options to those applicable to the subcommand
-- Fix vdo --modifyBlockMapPeriod
-- Report missing command option appropriately for all subcommands
-- Fix behavior of --indexMem when there's not enough memory
-- Remove obsolete nagios plugin from examples
-- Better error behavior for failing vdo status commands
-- Fix boundary check error for vdoLogicalSize
-- Resolves: rhbz#1507927
-- Resolves: rhbz#1508452
-- Resolves: rhbz#1508544
-- Resolves: rhbz#1508918
-- Resolves: rhbz#1509002
-- Resolves: rhbz#1510567
-- Resolves: rhbz#1512631
-- Resolves: rhbz#1522943
-
-* Fri Dec 01 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.72-12
-- Don't corrupt an existing filesystem with "vdo create" without "--force"
-- Resolves: rhbz#1510581
-
-* Mon Nov 27 2017 - Ken Raeburn <raeburn@redhat.com> - 6.1.0.55-11
-- Don't corrupt an existing filesystem with "vdo create" without "--force"
-- Resolves: rhbz#1510581
-
-* Fri Nov 17 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.55-10
-- manual pages: note logical size limit of 4P
-- manual pages: make cache size/thread count link clearer
-- Resolves: rhbz#1508452
-- Resolves: rhbz#1511042
-
-* Fri Nov 03 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.46-9
-- update manpage to not allow 0 as an option
-- enforce maximum vdoPhysicalThreads
-- update manpage to describe maximum vdoPhysicalThreads
-- Resolves: rhbz#1510405
-- Resolves: rhbz#1511075
-- Resolves: rhbz#1511085
-- Resolves: rhbz#1511091
-
-* Fri Nov 03 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.34-8
-- Bugfixes
-- Resolves: rhbz#1480047
-
-* Mon Oct 30 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.0-7
-- Don't let make install try to set file ownerships itself
-- Resolves: rhbz#1480047
-
-* Thu Oct 12 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.0-6
-- Added new man pages
-- Resolves: rhbz#1480047
-
-* Fri Oct  6 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.0-5
-- Fixed a typo in the package description
-- Fixed man page paths
-- Resolves: rhbz#1480047
-
-* Thu Oct  5 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.0-4
-- Fix vdostats name in nagios examples
-- Build only on the x86_64 architecture
-- Add systemd files
-- Resolves: rhbz#1480047
-
-* Thu Oct  5 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.0-3
-- Added missing Build-Requires and incorporated naming changes
-- Resolves: rhbz#1480047
-
-* Wed Oct  4 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.0-2
-- Fixed requirements and tags in %files section
-- Resolves: rhbz#1480047
-
-* Tue Oct  3 2017 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.0-1
-- Initial implementation
-- Resolves: rhbz#1480047
+* Sun Apr 29 2018 - J. corwin Coburn <corwin@redhat.com> - 6.1.0.168-1
+HASH(0x32eeb58)
