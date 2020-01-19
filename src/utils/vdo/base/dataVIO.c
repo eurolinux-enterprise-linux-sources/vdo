@@ -16,14 +16,14 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/base/dataVIO.c#1 $
+ * $Id: //eng/vdo-releases/magnesium/src/c++/vdo/base/dataVIO.c#7 $
  */
 
 #include "dataVIO.h"
 
 #include "logger.h"
-#include "util/atomic.h"
 
+#include "atomic.h"
 #include "blockMap.h"
 #include "compressionState.h"
 #include "extent.h"
@@ -126,11 +126,11 @@ void completeDataVIO(VDOCompletion *completion)
   DataVIO *dataVIO = asDataVIO(completion);
   if (completion->result != VDO_SUCCESS) {
     VIO *vio = dataVIOAsVIO(dataVIO);
-    logWithStringError(updateVIOErrorStats(vio), completion->result,
-                       "Completing %s VIO for LBN %" PRIu64
-                       " with error after %s",
-                       getVIOReadWriteFlavor(vio), dataVIO->logical.lbn,
-                       getOperationName(dataVIO));
+    updateVIOErrorStats(vio,
+                        "Completing %s VIO for LBN %" PRIu64
+                        " with error after %s",
+                        getVIOReadWriteFlavor(vio), dataVIO->logical.lbn,
+                        getOperationName(dataVIO));
   }
 
   dataVIOAddTraceRecord(dataVIO, THIS_LOCATION("$F($io)"));

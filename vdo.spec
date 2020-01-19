@@ -1,7 +1,7 @@
-%global commit       c0b89fedc22d2af62abe90c4ed5822c02c843d21
-%global gittag       6.1.1.125
+%global commit       3ec8918b7c60cecd7ca3c2e7d74e0b38fb341e39
+%global gittag       6.1.2.41
 %global shortcommit  %(c=%{commit}; echo ${c:0:7})
-%define spec_release 3
+%define spec_release 4
 #
 #
 #
@@ -12,7 +12,7 @@ Release: %{spec_release}%{?dist}
 License: GPLv2
 Source0: https://github.com/dm-vdo/%{name}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
 URL: http://github.com/dm-vdo/vdo
-Distribution: RHEL 7.6
+Distribution: RHEL 7.7
 Requires: PyYAML >= 3.10
 Requires: libuuid >= 2.23
 Requires: kmod-kvdo >= 6.1
@@ -183,12 +183,6 @@ make install DESTDIR=$RPM_BUILD_ROOT INSTALLOWNER= bindir=%{_bindir} \
 %doc %{_defaultdocdir}/%{name}/examples/ansible/test_vdocreate.yml
 %doc %{_defaultdocdir}/%{name}/examples/ansible/test_vdocreate_alloptions.yml
 %doc %{_defaultdocdir}/%{name}/examples/ansible/test_vdoremove.yml
-%doc %{_defaultdocdir}/%{name}/examples/ansible/vdo.py
-# Fedora doesn't byte-compile the examples.
-%if 0%{?rhel}
-%doc %{_defaultdocdir}/%{name}/examples/ansible/vdo.pyc
-%doc %{_defaultdocdir}/%{name}/examples/ansible/vdo.pyo
-%endif
 %dir %{_defaultdocdir}/%{name}/examples/monitor
 %doc %{_defaultdocdir}/%{name}/examples/monitor/monitor_check_vdostats_logicalSpace.pl
 %doc %{_defaultdocdir}/%{name}/examples/monitor/monitor_check_vdostats_physicalSpace.pl
@@ -198,12 +192,39 @@ make install DESTDIR=$RPM_BUILD_ROOT INSTALLOWNER= bindir=%{_bindir} \
 %{_mandir}/man8/vdo.8.gz
 %{_mandir}/man8/vdodmeventd.8.gz
 %{_mandir}/man8/vdodumpconfig.8.gz
-%{_mandir}/man8/vdodumpmetadata.8.gz
 %{_mandir}/man8/vdoforcerebuild.8.gz
 %{_mandir}/man8/vdoformat.8.gz
 %{_mandir}/man8/vdostats.8.gz
 
 %changelog
+* Wed Mar 27 2019 - Andy Walsh <awalsh@redhat.com> - 6.1.2.41-4
+- Removed the VDO Ansible module and associated examples from this package.
+  - Resolves: rhbz#1536515
+- Improved error messages from the vdo script.
+  - Resolves: rhbz#1688481
+
+* Tue Mar 19 2019 - Andy Walsh <awalsh@redhat.com> - 6.1.2.38-3
+- Fixed more error path memory leaks.
+  - Resolves: rhbz#1609426
+- Improved man pages.
+  - Resolves: rhbz#1636047
+- Improved checking for existing LVM physical volumes when formatting a new
+  VDO volume.
+  - Resolves: rhbz#1687797
+- Fixed a bug which would cause the default logical size to be 480 KB
+  smaller than it could be without causing over-provisioning.
+  - Resolves: rhbz#1532697
+- Removed extraneous man pages.
+  - Resolves: rhbz#1643284
+- Allowed VDO backing devices to be specified by major:minor device number.
+  - Resolves: rhbz#1637762
+- Improved behavior when attempting to create a VDO volume whose name conflicts
+  with an existing dm target.
+  - Resolves: rhbz#1588140
+- Modified vdo script to report fewer errors when removing a VDO which
+  sits atop a missing device.
+  - Resolves: rhbz#1535476
+
 * Fri Sep 14 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.1.125-3
 - Re-sync with the 'kmod-kvdo' package.
 - Related: rhbz#1628318
