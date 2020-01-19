@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/chapterWriter.c#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/chapterWriter.c#6 $
  */
 
 #include "chapterWriter.h"
@@ -159,7 +159,7 @@ int makeChapterWriter(Index *index, ChapterWriter **writerPtr)
   initCond(&writer->cond);
 
   // We're initialized, so now it's safe to start the writer thread.
-  result = createThread(closeChapters, writer, "writer", 0, &writer->thread);
+  result = createThread(closeChapters, writer, "writer", &writer->thread);
   if (result != UDS_SUCCESS) {
     freeChapterWriter(writer);
     return makeUnrecoverable(result);

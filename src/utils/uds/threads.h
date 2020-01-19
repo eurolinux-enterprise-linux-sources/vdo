@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/threads.h#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/threads.h#5 $
  */
 
 #ifndef THREADS_H
@@ -32,8 +32,7 @@
  *
  * @param threadFunc  function to run in new thread
  * @param threadData  private data for new thread
- * @param name        description of new thread, for logging
- * @param stackLimit  new thread's stack size limit, or zero
+ * @param name        name of the new thread
  * @param newThread   where to store the new thread id
  *
  * @return       success or failure indication
@@ -41,7 +40,6 @@
 int createThread(void       (*threadFunc)(void *),
                  void        *threadData,
                  const char  *name,
-                 size_t       stackLimit,
                  Thread      *newThread)
   __attribute__((warn_unused_result));
 
@@ -112,5 +110,30 @@ int enterBarrier(Barrier *barrier, bool *winner);
  * @return UDS_SUCCESS or an error code
  **/
 int yieldScheduler(void);
+
+/**
+ * Initialize a synchronous callback.
+ *
+ * @param callback  A synchronous callback
+ *
+ * @return UDS_SUCCESS or an error code
+ **/
+int initializeSynchronousRequest(SynchronousCallback *callback);
+
+/**
+ * Wait for a synchronous callback by waiting until the request/callback has
+ * been marked as complete, then destroy the contents of the callback.
+ *
+ * @param callback  A synchronous callback
+ **/
+void awaitSynchronousRequest(SynchronousCallback *callback);
+
+/**
+ * Perform a synchronous callback by marking the request/callback as complete
+ * and waking any thread waiting for completion.
+ *
+ * @param callback  A synchronous callback
+ **/
+void awakenSynchronousRequest(SynchronousCallback *callback);
 
 #endif /* THREADS_H */

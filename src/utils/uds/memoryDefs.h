@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/userLinux/uds/memoryDefs.h#1 $
+ * $Id: //eng/uds-releases/flanders/userLinux/uds/memoryDefs.h#2 $
  */
 
 #ifndef LINUX_USER_MEMORY_DEFS_H

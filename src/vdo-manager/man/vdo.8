@@ -1,4 +1,4 @@
-.TH VDO 8 "2017-09-12" "Red Hat" \" -*- nroff -*-
+.TH VDO 8 "2018-07-19" "Red Hat" \" -*- nroff -*-
 .\"
 .\" Copyright (c) 2018 Red Hat, Inc.
 .\"
@@ -17,7 +17,7 @@
 .\" Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 .\" 02110-1301, USA. 
 .\"
-.\" $Id: //eng/vdo-releases/magnesium-rhel7.5/src/python/vdo/man/vdo.8#1 $
+.\" $Id: //eng/vdo-releases/magnesium-rhel7.6/src/python/vdo/man/vdo.8#1 $
 .
 .\" Constants (as strings, for ease of use and consistency)
 .ds ackThreadsDefault 1
@@ -43,8 +43,8 @@
 .ds cpuThreadsMax 100
 .ds deduplicationDefault enabled
 .ds emulate512Default disabled
-.ds hashZoneThreadsDefault 2
-.ds hashZoneThreadsMin 1
+.ds hashZoneThreadsDefault 1
+.ds hashZoneThreadsMin 0
 .ds hashZoneThreadsMax 100
 .ds indexMemDefault 0.25
 .ds indexMemIntMin 1
@@ -182,10 +182,18 @@ Applicable options include:
 .TP
 .B create
 Creates a VDO volume and its associated index and makes it available. If
-\fB\-\-activate=disabled\fP is specified the VDO volume is created but not
-made available. Will not overwrite an existing file system or formatted VDO
-volume unless \fB\-\-force\fP is given. This command must be run with root
-privileges. Applicable options include:
+\fB\-\-activate=disabled\fP is specified the VDO volume is created but not made
+available.
+
+If the specified device is already in use by a VDO volume (as determined from
+the configuration file) the create will always be rejected, even if
+\fB\-\-force\fP is specified.  If the device is not so in use but is formatted
+as a VDO volume or contains an existing file system the create will be rejected
+unless \fB\-\-force\fP is given.
+
+This command must be run with root privileges.
+
+Applicable options include:
 .startOptionList
 \-\-name=\fIvolume\fP\fR (required)\fP
 \-\-device=\fIdevice\fP\fR (required)\fP
@@ -453,8 +461,8 @@ The logical size of the VDO volume.
 .B Physical size
 The size of a VDO volume's underlying physical storage.
 .TP
-.B Write policy
-The configured value of the write policy (sync or async).
+.B Configured write policy
+The configured value of the write policy (sync, async or auto).
 .TP
 .B VDO Statistics
 Output of the \fBvdostats\fP utility.
@@ -515,7 +523,10 @@ data is not expected to have good deduplication rates but compression is
 still desired.
 .TP
 .B \-\-device=\fIabsolute_path\fR
-Specifies the absolute path of the device to use for VDO storage.
+Specifies an absolute path of the device to use for VDO storage.
+This might not be the path that gets used to access the storage device
+by future command invocations; see the \fBDEVICE NAMES\fP section
+below.
 .TP
 .B \-\-emulate512=\*[bool]
 Specifies that the VDO volume is to emulate a 512 byte block device. The
@@ -536,7 +547,7 @@ result in data loss or corruption.\fP
 Specifies the amount of index memory in gigabytes; the default is
 currently \*[indexMemDefault] GB. The special decimal values 0.25, 0.5,
 0.75 can be used, as can any integer value at least \*[indexMemIntMin] and less
-than or equal to \*[indexMemIntMax]. (The special deciml values are matched as
+than or equal to \*[indexMemIntMax]. (The special decimal values are matched as
 exact strings; "0.5" works but "0.50" is not accepted.)
 .PP
 .B \-\-help
@@ -656,7 +667,7 @@ Specifies the write policy:
 .RS
 .TP
 .B sync
-Writes are acknowledged only after data is stably written. \fBThis 
+Writes are acknowledged only after data is stably written. \fBThis
 policy is not supported if the underlying storage is not also synchronous.\fP
 .TP
 .B async
@@ -665,10 +676,42 @@ stable storage. Data which has not been flushed is not guaranteed to persist
 in this mode.
 .TP
 .B auto
-VDO will check the storage device and determine whether it supports 
+VDO will check the storage device and determine whether it supports
 flushes. If it does, VDO will run in async mode, otherwise it will run
 in sync mode. This is the default.
 .RE
+.
+.
+.SH DEVICE NAMES
+Device recognition order can change at boot time, and devices can be
+added to or removed from a system, both possibly affecting device
+naming at boot time, so a device recognized as /dev/sda at one time
+may be /dev/sdb after a reboot.
+.PP
+In the directory /dev/disk/by-id, \fBudev\fP normally creates symbolic
+links after booting when devices are identified, and are named based
+on device serial numbers, UUIDs, WWNs, etc., so they should be more
+stable names across reboots for referring to the device in question.
+.PP
+When a VDO device is created, \fBvdo\fP will look for links in
+/dev/disk/by-id that refer to the same block device as the one
+supplied on the command line, and if some are found, use one of those
+instead. This name will be written into the config file for future
+use. If no such links are found, the device name as supplied is used.
+.PP
+This may cause problems if a VDO storage volume needs to be copied
+from a failing device to a replacement, or from a small device to a
+larger one to allow for expansion. In cases like these, the config
+file may need to be edited to refer to the new device; there is
+currently no automated way to make this change with the administrative
+tools. (If a logical volume is used as the VDO storage volume, VDO
+will find the storage via the volume's UUID; the standard LVM tools
+can be used to manage the migration or growth of the volume.)
+.PP
+If a multipath device is used, \fBudev\fP should be configured to
+either not create any /dev/disk/by-id symbolic links for any of the
+devices used, or to only create a link for the multipath device
+itself.
 .
 .
 .SH FILES
@@ -696,6 +739,29 @@ Of course, as with any thinly-provisioned device, it may not hold 10
 terabytes of user data even after deduplication and compression unless
 the underlying storage has sufficient space available for the
 resulting compressed, unique data blocks plus metadata overhead.
+.
+.SH EXIT STATUS
+The following are exit statuses that may be encountered during normal
+operation.  Any other exit status is an abnormal occurrence.
+.IP 0
+Success.
+.IP 1
+Non-specific failure.
+.IP 2
+Pre-processing argument parsing failure.
+.IP 3
+Non-specific processing failure.
+.IP 5
+Incorrect state for requested action; e.g., attempting to perform a
+growPhysical on a stopped vdo.
+.IP 6
+A requested operation from the system failed; e.g., error from dmsetup(8).
+.IP 7
+User error; e.g., attempting to create a vdo with the same name as one already
+existing.
+.
 .\" .SH NOTES
+.
 .SH SEE ALSO
+.BR udev (7),
 .BR vdostats (8).

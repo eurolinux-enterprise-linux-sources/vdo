@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/udsMain.c#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/udsMain.c#6 $
  */
 
 #include "uds.h"
@@ -29,7 +29,6 @@
 #include "indexSession.h"
 #include "logger.h"
 #include "memoryAlloc.h"
-#include "notificationDefs.h"
 #include "udsState.h"
 
 const UdsMemoryConfigSize UDS_MEMORY_CONFIG_MAX   = 1024;
@@ -357,9 +356,6 @@ static int makeLocalIndex(const char       *name,
 
   result = makeIndexSession(gridConfig, loadType, userConfig, &session->id);
   udsFreeGridConfig(gridConfig);
-  if (result == UDS_SUCCESS) {
-    notifyIndexOpened(*session, name);
-  }
   return result;
 }
 

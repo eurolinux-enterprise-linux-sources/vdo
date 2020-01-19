@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/userLinux/uds/threadCondVarLinuxUser.c#1 $
+ * $Id: //eng/uds-releases/flanders/userLinux/uds/threadCondVarLinuxUser.c#2 $
  */
 
 #include "threadCondVar.h"

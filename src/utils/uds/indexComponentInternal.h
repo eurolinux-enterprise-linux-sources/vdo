@@ -16,20 +16,13 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/indexComponentInternal.h#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/indexComponentInternal.h#3 $
  */
 
 #ifndef INDEX_COMPONENT_INTERNAL_H
 #define INDEX_COMPONENT_INTERNAL_H
 
 #include "indexComponent.h"
-
-struct readPortal {
-  unsigned int      zones;
-  ComponentPortal   common;
-  IORegion        **regions;
-  BufferedReader  **readers;
-};
 
 struct writeZone {
   IndexComponent           *component;

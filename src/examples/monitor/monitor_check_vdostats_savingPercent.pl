@@ -18,13 +18,13 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 # 02110-1301, USA. 
 #
-# nagios_check_vdostats_savingPercent.pl [--warning <warn_pct>|-w <warn_pct>]
-#                                        [--critical <crit_pct>|-c <crit_pct>]
-#                                        <deviceName>
+# monitor_check_vdostats_savingPercent.pl [--warning <warn_pct>|-w <warn_pct>]
+#                                         [--critical <crit_pct>|-c <crit_pct>]
+#                                         <deviceName>
 #
 # This script parses the output of "vdostats --verbose" for a given VDO
-# volume, processes the "used percent" value, and returns a Nagios-compliant
-# status code, and a single-line output with status information.
+# volume, processes the "used percent" value, and returns a status code,
+# and a single-line output with status information.
 #
 # Options:
 #
@@ -36,7 +36,7 @@
 #
 # The "vdostats" program must be in the path used by "sudo".
 #
-# $Id: //eng/vdo-releases/magnesium-rhel7.5/src/tools/nagios/nagios_check_vdostats_savingPercent.pl#1 $
+# $Id: //eng/vdo-releases/magnesium-rhel7.6/src/tools/monitor/monitor_check_vdostats_savingPercent.pl#1 $
 #
 ##
 
@@ -44,12 +44,12 @@ use strict;
 use warnings FATAL => qw(all);
 use Getopt::Long;
 
-# Constants for the Nagios service status return values.
+# Constants for the service status return values.
 use constant {
-  NAGIOS_SERVICE_OK       => 0,
-  NAGIOS_SERVICE_WARNING  => 1,
-  NAGIOS_SERVICE_CRITICAL => 2,
-  NAGIOS_SERVICE_UNKNOWN  => 3,
+  MONITOR_SERVICE_OK       => 0,
+  MONITOR_SERVICE_WARNING  => 1,
+  MONITOR_SERVICE_CRITICAL => 2,
+  MONITOR_SERVICE_UNKNOWN  => 3,
 };
 
 my $inputWarnThreshold = -1;
@@ -112,11 +112,11 @@ sub getStats {
 # main
 ##
 if (scalar(@ARGV) != 1) {
-  print("Usage: nagios_check_vdostats_savingPercent.pl\n");
-  print("               [--warning |-w VALUE]\n");
-  print("               [--critical|-c VALUE]\n");
-  print("               <deviceName>\n");
-  exit(NAGIOS_SERVICE_UNKNOWN);
+  print("Usage: monitor_check_vdostats_savingPercent.pl\n");
+  print("                [--warning |-w VALUE]\n");
+  print("                [--critical|-c VALUE]\n");
+  print("                <deviceName>\n");
+  exit(MONITOR_SERVICE_UNKNOWN);
 }
 
 getStats();
@@ -125,7 +125,7 @@ getStats();
 # Otherwise, print the stats.
 if (!%stats) {
   printf("Unable to load vdostats verbose output.\n");
-  exit(NAGIOS_SERVICE_UNKNOWN);
+  exit(MONITOR_SERVICE_UNKNOWN);
 }
 
 printf("saving percent: %s%%\n", $stats{"saving percent"});
@@ -137,21 +137,21 @@ printf("saving percent: %s%%\n", $stats{"saving percent"});
 # An empty VDO volume has a saving percent of "N/A" when 0 logical blocks
 # are used. This is interpreted as an "OK" status.
 if ($stats{"saving percent"} =~ "N/A") {
-  exit(NAGIOS_SERVICE_OK);
+  exit(MONITOR_SERVICE_OK);
 }
 
 if ($stats{"saving percent"} <= $warnThreshold
     && $stats{"saving percent"} > $critThreshold) {
-  exit(NAGIOS_SERVICE_WARNING);
+  exit(MONITOR_SERVICE_WARNING);
 }
 
 if ($stats{"saving percent"} <= $critThreshold) {
-  exit(NAGIOS_SERVICE_CRITICAL);
+  exit(MONITOR_SERVICE_CRITICAL);
 }
 
 if ($stats{"saving percent"} > $warnThreshold) {
-  exit(NAGIOS_SERVICE_OK);
+  exit(MONITOR_SERVICE_OK);
 }
 
 # Default exit condition.
-exit(NAGIOS_SERVICE_UNKNOWN);
+exit(MONITOR_SERVICE_UNKNOWN);

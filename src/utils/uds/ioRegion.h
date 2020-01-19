@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/ioRegion.h#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/ioRegion.h#4 $
  */
 
 #ifndef IO_REGION_H
@@ -83,6 +83,8 @@ static INLINE int closeIORegion(IORegion **regionPtr)
  * @param [in]  region      The IORegion.
  * @param [out] bufferSize  The best size for IO buffers. Will be a multiple
  *                          (possibly 1) of the region's block size.
+ *
+ * @return UDS_SUCCESS or an error code
  **/
 __attribute__((warn_unused_result))
 static INLINE int getRegionBestBufferSize(IORegion *region, size_t *bufferSize)

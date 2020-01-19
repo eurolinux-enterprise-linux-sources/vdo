@@ -41,7 +41,10 @@ short_description: Module to control VDO
 version_added: "2.5"
 
 description:
-    - "This module controls the VDO dedupe and compression device."
+    - This module controls the VDO dedupe and compression device.
+      VDO, or Virtual Data Optimizer, is a device-mapper target that
+      provides inline block-level deduplication, compression, and
+      thin provisioning capabilities to primary storage.
 
 options:
     name:
@@ -52,9 +55,15 @@ options:
         choices: [ "present", "absent" ]
         description:
             - Whether this VDO volume should be "present" or "absent".
-              If a "present" VDO volume already exists, it will not be
-              created. If an "absent" VDO volume does not exist, it
-              will not be removed.
+              If a "present" VDO volume does not exist, it will be
+              created.  If a "present" VDO volume already exists, it
+              will be modified, by updating the configuration, which
+              will take effect when the VDO volume is restarted.
+              Not all parameters of an existing VDO volume can be
+              modified; the "statusparamkeys" list contains the
+              parameters that can be modified after creation. If an
+              "absent" VDO volume does not exist, it will not be
+              removed.
         required: true
     activated:
         choices: [ "yes", "no" ]
@@ -202,6 +211,10 @@ options:
         required: false
 notes:
   - In general, the default thread configuration should be used.
+requirements:
+  - PyYAML
+  - kmod-kvdo
+  - vdo
 '''
 
 EXAMPLES = '''
@@ -240,13 +253,6 @@ except ImportError:
 # @return vdolist  A list of currently created VDO volumes.
 def inventory_vdos(module, vdo_cmd):
     rc, vdostatusout, err = module.run_command("%s status" % (vdo_cmd))
-
-    # The VDO volume name is in a standalone line with a leading ' - '
-    # and a trailing ':'.  This could potentially be collected via
-    # PyYaml, but a VDO volume with a name that collides # with a
-    # statistic field key (e.g.: 'Server') risks the inability to
-    # return the volume name.  For now, don't create a VDO volume named
-    # 'Server' or 'Enabled'
 
     # if rc != 0:
     #   module.fail_json(msg="Inventorying VDOs failed: %s"
@@ -368,11 +374,6 @@ def add_vdooptions(params):
 
 
 def run_module():
-
-    # Debugging note:
-    # Don't use "print" in ansible modules.  To print debug messages,
-    # add it to the "result" dictionary, the contents of which is printed
-    # when executing "ansible-playbook foo.yml -vvvv".
 
     # Define the available arguments/parameters that a user can pass to
     # the module.
@@ -516,6 +517,7 @@ def run_module():
         # The 'vdo status' keys that are currently modifiable.
         statusparamkeys = ['Acknowledgement threads',
                            'Bio submission threads',
+                           'Block map cache size',
                            'CPU-work threads',
                            'Logical threads',
                            'Physical threads',

@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/volume.c#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/volume.c#10 $
  */
 
 #include "volume.h"
@@ -38,13 +38,11 @@
 #include "sparseCache.h"
 #include "stringUtils.h"
 #include "threads.h"
-#include "util/atomic.h"
 #include "volumeInternals.h"
 
 enum {
-  MAX_BAD_CHAPTERS    = 100,    // max number of contiguous bad chapters
-  VOLUME_READ_THREADS = 2,      // Number of reader threads
-  READER_STACK_SIZE   = 1 * MEGABYTE // just a guess
+  MAX_BAD_CHAPTERS    = 100,   // max number of contiguous bad chapters
+  VOLUME_READ_THREADS = 2      // Number of reader threads
 };
 
 static const NumericValidationData validRange = {
@@ -174,13 +172,10 @@ void freeVolume(Volume *volume)
 /**********************************************************************/
 int closeVolume(Volume *volume)
 {
-  invalidateSparseCache(volume->sparseCache);
-
   int result = invalidatePageCache(volume->pageCache);
   if (result != UDS_SUCCESS) {
     return result;
   }
-
   return doneWithVolume(volume);
 }
 
@@ -214,14 +209,13 @@ static INLINE unsigned int getZoneNumber(Request *request)
 /**********************************************************************/
 static void waitForReadQueueNotFull(Volume *volume, Request *request)
 {
-  unsigned int pageSearched = 0;
   unsigned int zoneNumber = getZoneNumber(request);
-  if (isSearchPending(volume->pageCache, zoneNumber)) {
+  InvalidateCounter invalidateCounter = getInvalidateCounter(volume->pageCache,
+                                                             zoneNumber);
+  if (searchPending(invalidateCounter)) {
     // Increment the invalidate counter to avoid deadlock where the reader
     // threads cannot make progress because they are waiting on the counter
     // and the index thread cannot because the read queue is full.
-
-    pageSearched = volume->pageCache->searchPendingCounters[zoneNumber].page;
     endPendingSearch(volume->pageCache, zoneNumber);
   }
 
@@ -231,9 +225,10 @@ static void waitForReadQueueNotFull(Volume *volume, Request *request)
     waitCond(&volume->readThreadsReadDoneCond, &volume->readThreadsMutex);
   }
 
-  if (pageSearched != 0) {
+  if (searchPending(invalidateCounter)) {
     // Increment again so we get back to an odd value.
-    beginPendingSearch(volume->pageCache, pageSearched, zoneNumber);
+    beginPendingSearch(volume->pageCache, pageBeingSearched(invalidateCounter),
+                       zoneNumber);
   }
 }
 
@@ -374,25 +369,10 @@ static void readThreadFunction(void *arg)
       result = selectVictimInCache(volume->pageCache, &page);
       if (result == UDS_SUCCESS) {
         unlockMutex(&volume->readThreadsMutex);
-
-        /*
-         * Make sure the page map update above occurs before we check the
-         * invalidate counter. This ensures that any thread in searchVolume()
-         * will have updated the invalidateCounter so that we do not read into
-         * any page which is being searched.
-         */
-        memoryFence();
-
-        result = waitForPendingSearches(volume->pageCache, page->physicalPage);
+        result = readPageToBuffer(volume, physicalPage, page->data);
         if (result != UDS_SUCCESS) {
-          logWarning("Error waiting for pending search");
+          logWarning("Error reading page %u from volume", physicalPage);
           cancelPageInCache(volume->pageCache, physicalPage, page);
-        } else {
-          result = readPageToBuffer(volume, physicalPage, page->data);
-          if (result != UDS_SUCCESS) {
-            logWarning("Error reading page %u from volume", physicalPage);
-            cancelPageInCache(volume->pageCache, physicalPage, page);
-          }
         }
         lockMutex(&volume->readThreadsMutex);
       } else {
@@ -410,15 +390,6 @@ static void readThreadFunction(void *arg)
           }
 
           if (result == UDS_SUCCESS) {
-            /*
-             * Make sure the read above completes before we update the read
-             * pending flag. This ensures that read is finished before setting
-             * the read pending flag to false, which prevents a thread from
-             * trying to use a page in the page map before the reader thread
-             * has finished reading it.
-             */
-            memoryFence();
-
             result = putPageInCache(volume->pageCache, physicalPage, page);
             if (result != UDS_SUCCESS) {
               logWarning("Error putting page %u in cache", physicalPage);
@@ -445,14 +416,14 @@ static void readThreadFunction(void *arg)
       STAILQ_REMOVE_HEAD(&queuedRequests, link);
 
       /*
-       * If we've read in a record page, we're going to do an immediate
-       * search, in an attempt to speed up processing when we requeue the
-       * request, so that it doesn't have to go back into the searchVolume
-       * code again. However, if we've just read in an index page, we don't
-       * want to search. We want the request to be processed again and
-       * searchVolume to be run. We have added new fields in request to allow
-       * the index code to know whether it can stop processing before
-       * searchVolume is called again.
+       * If we've read in a record page, we're going to do an immediate search,
+       * in an attempt to speed up processing when we requeue the request, so
+       * that it doesn't have to go back into the getRecordFromZone code again.
+       * However, if we've just read in an index page, we don't want to search.
+       * We want the request to be processed again and getRecordFromZone to be
+       * run.  We have added new fields in request to allow the index code to
+       * know whether it can stop processing before getRecordFromZone is called
+       * again.
        */
       if ((result == UDS_SUCCESS) && (page != NULL) && recordPage) {
         if (searchRecordPage(page->data, &request->hash, volume->geometry,
@@ -490,7 +461,7 @@ int createReaderThreads(Volume *volume, unsigned int numReaderThreads)
 
   for (unsigned int i = 0; i < numReaderThreads; i++) {
     result = createThread(readThreadFunction, (void *) volume, "reader",
-                          READER_STACK_SIZE, &volume->readerThreads[i]);
+                          &volume->readerThreads[i]);
     if (result != UDS_SUCCESS) {
       return UDS_ENOTHREADS;
     }
@@ -534,17 +505,21 @@ static int readPageLocked(Volume        *volume,
       logWarning("Error selecting cache victim for page read");
       return result;
     }
-    result = waitForPendingSearches(volume->pageCache, page->physicalPage);
-    if (result != UDS_SUCCESS) {
-      logWarning("Error waiting for pending search");
-      cancelPageInCache(volume->pageCache, physicalPage, page);
-      return result;
-    }
-    result = readPageFromVolume(volume, physicalPage, page);
+    result = readPageToBuffer(volume, physicalPage, page->data);
     if (result != UDS_SUCCESS) {
       logWarning("Error reading page %u from volume", physicalPage);
       cancelPageInCache(volume->pageCache, physicalPage, page);
       return result;
+    }
+    if (!isRecordPage(volume->geometry, physicalPage)) {
+      result = initializeIndexPage(volume, physicalPage, page);
+      if (result != UDS_SUCCESS) {
+        if (volume->lookupMode != LOOKUP_FOR_REBUILD) {
+          logWarning("Corrupt index page %u", physicalPage);
+        }
+        cancelPageInCache(volume->pageCache, physicalPage, page);
+        return result;
+      }
     }
     result = putPageInCache(volume->pageCache, physicalPage, page);
     if (result != UDS_SUCCESS) {
@@ -748,65 +723,37 @@ static int searchCachedIndexPage(Volume             *volume,
    * has been incremented.
    */
   beginPendingSearch(volume->pageCache, physicalPage, zoneNumber);
-  memoryFence();
 
   CachedPage *page = NULL;
   int result = getPageProtected(volume, request, physicalPage,
                                 cacheProbeType(request, true), &page);
   if (result != UDS_SUCCESS) {
-    // Make sure that search above has finished before incrementing the
-    // invalidate counter.
-    memoryFence();
     endPendingSearch(volume->pageCache, zoneNumber);
     return result;
   }
 
-  result = ASSERT_SEARCH_IS_PENDING(volume->pageCache, zoneNumber);
+  result
+    = ASSERT_LOG_ONLY(searchPending(getInvalidateCounter(volume->pageCache,
+                                                         zoneNumber)),
+                      "Search is pending for zone %u", zoneNumber);
   if (result != UDS_SUCCESS) {
     return result;
   }
 
   result = searchChapterIndexPage(&page->indexPage, volume->geometry, name,
                                   recordPageNumber);
-
-  // Make sure that search above has finished before incrementing the
-  // invalidate counter.
-  memoryFence();
   endPendingSearch(volume->pageCache, zoneNumber);
-
   return result;
 }
 
-/**
- * Fetch a record page from the cache or read it from the volume and search it
- * for a chunk name.
- *
- * If a match is found, optionally returns the metadata from the stored
- * record. If the requested record page is not cached, the page fetch may be
- * asynchronously completed on the slow lane, in which case UDS_QUEUED will be
- * returned and the request will be requeued for continued processing after
- * the page is read and added to the cache.
- *
- * @param volume           the volume containing the record page to search
- * @param request          the request originating the search (may be NULL for
- *                         a direct query from volume replay)
- * @param name             the name of the block or chunk
- * @param chapter          the chapter to search
- * @param recordPageNumber the record page number of the page to search
- * @param duplicate        an array in which to place the metadata of the
- *                         duplicate, if one was found
- * @param found            a (bool *) which will be set to true if the chunk
- *                         was found
- *
- * @return UDS_SUCCESS, UDS_QUEUED, or an error code
- **/
-static int searchCachedRecordPage(Volume             *volume,
-                                  Request            *request,
-                                  const UdsChunkName *name,
-                                  unsigned int        chapter,
-                                  int                 recordPageNumber,
-                                  UdsChunkData       *duplicate,
-                                  bool               *found)
+/**********************************************************************/
+int searchCachedRecordPage(Volume             *volume,
+                           Request            *request,
+                           const UdsChunkName *name,
+                           unsigned int        chapter,
+                           int                 recordPageNumber,
+                           UdsChunkData       *duplicate,
+                           bool               *found)
 {
   *found = false;
 
@@ -839,15 +786,11 @@ static int searchCachedRecordPage(Volume             *volume,
    * incremented.
    */
   beginPendingSearch(volume->pageCache, physicalPage, zoneNumber);
-  memoryFence();
 
   CachedPage *recordPage;
   result = getPageProtected(volume, request, physicalPage,
                             cacheProbeType(request, false), &recordPage);
   if (result != UDS_SUCCESS) {
-    // Make sure that search above has finished before incrementing the
-    // invalidate counter.
-    memoryFence();
     endPendingSearch(volume->pageCache, zoneNumber);
     return result;
   }
@@ -855,28 +798,8 @@ static int searchCachedRecordPage(Volume             *volume,
   if (searchRecordPage(recordPage->data, name, geometry, duplicate)) {
     *found = true;
   }
-
-  memoryFence();
   endPendingSearch(volume->pageCache, zoneNumber);
-
   return UDS_SUCCESS;
-}
-
-/**********************************************************************/
-int readPageFromVolume(Volume       *volume,
-                       unsigned int  physicalPage,
-                       CachedPage   *page)
-{
-  bool recordPage = isRecordPage(volume->geometry, physicalPage);
-  int result = readPageToBuffer(volume, physicalPage, page->data);
-  if (result != UDS_SUCCESS) {
-    return result;
-  }
-  if (!recordPage) {
-    result = initializeIndexPage(volume, physicalPage, page);
-  }
-
-  return result;
 }
 
 /**********************************************************************/
@@ -904,54 +827,13 @@ int readChapterIndexFromVolume(const Volume     *volume,
 }
 
 /**********************************************************************/
-static int searchVolumePageCache(Volume             *volume,
-                                 Request            *request,
-                                 const UdsChunkName *name,
-                                 unsigned int        chapter,
-                                 unsigned int        indexPageNumber,
-                                 UdsChunkData       *metadata,
-                                 bool               *found)
+int searchVolumePageCache(Volume             *volume,
+                          Request            *request,
+                          const UdsChunkName *name,
+                          uint64_t            virtualChapter,
+                          UdsChunkData       *metadata,
+                          bool               *found)
 {
-  int recordPageNumber;
-  int result = searchCachedIndexPage(volume, request, name, chapter,
-                                     indexPageNumber, &recordPageNumber);
-  if (result == UDS_SUCCESS) {
-    result = searchCachedRecordPage(volume, request, name, chapter,
-                                    recordPageNumber, metadata, found);
-  }
-
-  return result;
-}
-
-/**********************************************************************/
-int searchVolume(Volume             *volume,
-                 Request            *request,
-                 const UdsChunkName *name,
-                 uint64_t            virtualChapter,
-                 bool                isSparse,
-                 UdsChunkData       *metadata,
-                 bool               *found)
-{
-  if (found == NULL) {
-    return logErrorWithStringError(UDS_INVALID_ARGUMENT,
-                                   "searchVolume: found parameter is NULL");
-  }
-
-  // The slow lane thread has determined the location previously. We don't need
-  // to search again. Just return the location.
-  if ((request != NULL) && request->slLocationKnown) {
-    *found = (request->slLocation != LOC_UNAVAILABLE);
-    return UDS_SUCCESS;
-  }
-
-  if (isSparse && sparseCacheContains(volume->sparseCache,
-                                      virtualChapter,
-                                      request->zoneNumber)) {
-    // The named chunk, if it exists, is in a sparse chapter that is cached,
-    // so just run the chunk through the sparse chapter cache search.
-    return searchVolumeSparseCache(volume, request, virtualChapter, found);
-  }
-
   unsigned int physicalChapter
     = mapToPhysicalChapter(volume->geometry, virtualChapter);
   unsigned int indexPageNumber;
@@ -961,40 +843,14 @@ int searchVolume(Volume             *volume,
     return result;
   }
 
-  return (searchVolumePageCache(volume, request, name, physicalChapter,
-                                indexPageNumber, metadata, found));
-}
-
-/**************************************************************************/
-int searchVolumeSparseCache(Volume   *volume,
-                            Request  *request,
-                            uint64_t  virtualChapter,
-                            bool     *found)
-{
-  if (found == NULL) {
-    return logErrorWithStringError(UDS_INVALID_ARGUMENT,
-                               "searchVolumeSparseCache: invalid found field");
-  }
-
   int recordPageNumber;
-  int result = searchSparseCache(volume->sparseCache,
-                                 volume->indexPageMap,
-                                 &request->hash,
-                                 request->zoneNumber,
-                                 &virtualChapter,
-                                 &recordPageNumber);
-  if ((result != UDS_SUCCESS) || (virtualChapter == UINT64_MAX)) {
-    return result;
+  result = searchCachedIndexPage(volume, request, name, physicalChapter,
+                                 indexPageNumber, &recordPageNumber);
+  if (result == UDS_SUCCESS) {
+    result = searchCachedRecordPage(volume, request, name, physicalChapter,
+                                    recordPageNumber, metadata, found);
   }
 
-  // XXX map to physical chapter and validate. It would be nice to just pass
-  // the virtual in to the slow lane, since it's tracking invalidations.
-  unsigned int chapter
-    = mapToPhysicalChapter(volume->geometry, virtualChapter);
-
-  result = searchCachedRecordPage(volume, request, &request->hash,
-                                  chapter, recordPageNumber,
-                                  &request->oldMetadata, found);
   return result;
 }
 
@@ -1004,8 +860,6 @@ int forgetChapter(Volume             *volume,
                   InvalidationReason  reason)
 {
   logDebug("forgetting chapter %" PRIu64, virtualChapter);
-  invalidateSparseCacheChapter(volume->sparseCache, virtualChapter);
-
   unsigned int physicalChapter
     = mapToPhysicalChapter(volume->geometry, virtualChapter);
   lockMutex(&volume->readThreadsMutex);
@@ -1056,13 +910,6 @@ static int donateIndexPageLocked(Volume       *volume,
   CachedPage *page = NULL;
   int result = selectVictimInCache(volume->pageCache, &page);
   if (result != UDS_SUCCESS) {
-    return result;
-  }
-
-  result = waitForPendingSearches(volume->pageCache, page->physicalPage);
-  if (result != UDS_SUCCESS) {
-    logWarning("Error waiting for pending search");
-    cancelPageInCache(volume->pageCache, physicalPage, page);
     return result;
   }
 
@@ -1235,16 +1082,21 @@ off_t getVolumeSize(Volume *volume)
 /**********************************************************************/
 size_t getCacheSize(Volume *volume)
 {
-  return (getPageCacheSize(volume->pageCache)
-          + getSparseCacheMemorySize(volume->sparseCache));
+  size_t size = getPageCacheSize(volume->pageCache);
+  if (isSparse(volume->geometry)) {
+    size += getSparseCacheMemorySize(volume->sparseCache);
+  }
+  return size;
 }
 
 /**********************************************************************/
 void getCacheCounters(Volume *volume, CacheCounters *counters)
 {
   getPageCacheCounters(volume->pageCache, counters);
-  CacheCounters sparseCounters = getSparseCacheCounters(volume->sparseCache);
-  addCacheCounters(counters, &sparseCounters);
+  if (isSparse(volume->geometry)) {
+    CacheCounters sparseCounters = getSparseCacheCounters(volume->sparseCache);
+    addCacheCounters(counters, &sparseCounters);
+  }
 }
 
 /**********************************************************************/

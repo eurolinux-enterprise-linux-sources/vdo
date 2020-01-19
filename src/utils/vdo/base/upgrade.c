@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.5/src/c++/vdo/base/upgrade.c#1 $
+ * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/base/upgrade.c#1 $
  */
 
 #include "upgrade.h"
@@ -35,10 +35,12 @@
 #include "volumeGeometry.h"
 
 /* The latest supported Sodium version */
-static const VersionNumber SODIUM_MASTER_VERSION_67_0 = {
-  .majorVersion = 67,
-  .minorVersion =  0,
-};
+/* Commented out because not currently used.
+ * static const VersionNumber SODIUM_MASTER_VERSION_67_0 = {
+ * .majorVersion = 67,
+ * .minorVersion =  0,
+ * };
+ */
 
 /* The component data version for current Sodium */
 static const VersionNumber SODIUM_COMPONENT_DATA_41_0 = {

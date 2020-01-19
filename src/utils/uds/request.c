@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/request.c#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/request.c#7 $
  */
 
 #include "request.h"
@@ -31,15 +31,6 @@
 #include "permassert.h"
 #include "requestLimit.h"
 #include "udsState.h"
-
-/**
- * Synchronizer for synchronous callbacks. Really just a SynchronizedBoolean.
- **/
-struct synchronousCallback {
-  Mutex   mutex;
-  CondVar condition;
-  bool    complete;
-};
 
 // ************** Start of request turnaround histogram code **************
 #if HISTOGRAMS
@@ -69,60 +60,10 @@ void doTurnaroundHistogram(const char *name)
 #endif /* HISTOGRAMS */
 // ************** End of request turnaround histogram code **************
 
-/**
- * Perform a synchronous callback by marking the request/callback
- * as complete and waking any thread waiting for completion.
- **/
-static void awakenSynchronousRequest(SynchronousCallback *synchronous)
-{
-  // Awaken any users of this synchronous request.
-  lockMutex(&synchronous->mutex);
-  synchronous->complete = true;
-  // This MUST be inside the mutex to ensure the callback structure
-  // is not destroyed before this thread has called broadcast.
-  broadcastCond(&synchronous->condition);
-  unlockMutex(&synchronous->mutex);
-}
-
-/**
- * Initialize a synchronous callback.
- **/
-static int initializeSynchronousRequest(SynchronousCallback *synchronous)
-{
-  int result = initCond(&synchronous->condition);
-  if (result != UDS_SUCCESS) {
-    return result;
-  }
-  result = initMutex(&synchronous->mutex);
-  if (result != UDS_SUCCESS) {
-    return result;
-  }
-  synchronous->complete = false;
-  return UDS_SUCCESS;
-}
-
-/**
- * Wait for a synchronous callback by waiting until the request/callback has
- * been marked as complete, then destroy the contents of the callback.
- **/
-static void awaitSynchronousRequest(SynchronousCallback *synchronous)
-{
-  lockMutex(&synchronous->mutex);
-  while (!synchronous->complete) {
-    waitCond(&synchronous->condition, &synchronous->mutex);
-  }
-  unlockMutex(&synchronous->mutex);
-
-  // We're done, so destroy the contents of the callback structure.
-  destroyCond(&synchronous->condition);
-  destroyMutex(&synchronous->mutex);
-}
-
 /**********************************************************************/
 int launchAllocatedClientRequest(Request *request)
 {
-  int result = getBaseContext(request->blockContext.id, BLOCK_CONTEXT,
-                              &request->context);
+  int result = getBaseContext(request->blockContext.id, &request->context);
   if (result != UDS_SUCCESS) {
     return sansUnrecoverable(result);
   }
@@ -139,9 +80,6 @@ int launchAllocatedClientRequest(Request *request)
   request->isControlMessage = false;
   request->unbatched        = false;
 
-#if NAMESPACES
-  xorNamespace(&request->hash, &request->context->namespaceHash);
-#endif /* NAMESPACES */
   request->router = selectGridRouter(request->context->indexSession->grid,
                                      &request->hash);
 
@@ -150,9 +88,7 @@ int launchAllocatedClientRequest(Request *request)
 }
 
 /**********************************************************************/
-int createRequest(unsigned int   contextId,
-                  ContextType    contextType,
-                  Request      **requestPtr)
+int createRequest(unsigned int contextId, Request **requestPtr)
 {
   if (requestPtr == NULL) {
     logWarningWithStringError(UDS_INVALID_ARGUMENT,
@@ -161,7 +97,7 @@ int createRequest(unsigned int   contextId,
   }
 
   UdsContext *context;
-  int result = getBaseContext(contextId, contextType, &context);
+  int result = getBaseContext(contextId, &context);
   if (result != UDS_SUCCESS) {
     return sansUnrecoverable(result);
   }
@@ -201,18 +137,19 @@ int createRequest(unsigned int   contextId,
 }
 
 /**********************************************************************/
-int launchClientRequest(unsigned int         contextId,
-                        ContextType          contextType,
-                        UdsCallbackType      callbackType,
-                        bool                 update,
-                        const UdsChunkName  *chunkName,
-                        UdsCookie            cookie,
-                        void                *metadata,
-                        size_t               dataLength,
-                        const void          *data)
+int launchClientRequest(unsigned int        contextId,
+                        UdsCallbackType     callbackType,
+                        bool                update,
+                        const UdsChunkName *chunkName,
+                        UdsCookie           cookie,
+                        void               *metadata)
 {
+  if (chunkName == NULL) {
+    return UDS_CHUNK_NAME_REQUIRED;
+  }
+
   Request *request;
-  int result = createRequest(contextId, contextType, &request);
+  int result = createRequest(contextId, &request);
   if (result != UDS_SUCCESS) {
     return result;
   }
@@ -220,30 +157,19 @@ int launchClientRequest(unsigned int         contextId,
   request->update     = update;
   request->cookie     = cookie;
   request->type       = callbackType;
-  request->dataLength = dataLength;
   request->action     = (RequestAction) callbackType;
 
-  RequestStage initialStage = STAGE_TRIAGE;
-  if (chunkName != NULL) {
-    setRequestHash(request, chunkName);
-  } else if (data != NULL) {
-    initialStage = STAGE_HASH;
-    if (dataLength > 0) {
-      result = memdup(data, dataLength, "request data", &request->data);
-    }
-  } else {
-    result = ASSERT_FALSE("request needs chunk name or chunk data");
-  }
-  if (result != UDS_SUCCESS) {
-    freeRequest(request);
-    return result;
-  }
+  // The chunk name is known so we can select a router to handle the request.
+  request->hash   = *chunkName;
+  request->router = selectGridRouter(request->context->indexSession->grid,
+                                     &request->hash);
 
   if (metadata != NULL) {
-    (*request->context->metadataEncoder)(metadata, request);
+    memcpy(request->newMetadata.data, metadata,
+           request->context->metadataSize);
   }
 
-  enqueueRequest(request, initialStage);
+  enqueueRequest(request, STAGE_TRIAGE);
   return UDS_SUCCESS;
 }
 
@@ -372,10 +298,6 @@ void freeRequest(Request *request)
   bool holdsPermit = (!request->fromCallback && !request->isControlMessage);
 
   FREE(request->serverContext);
-
-  // Attempt to free data block just in case (this will be NULL if completed
-  // in the hash phase).
-  FREE(request->data);
   FREE(request);
   request = NULL;
 
@@ -392,23 +314,6 @@ void freeRequest(Request *request)
   // Release the counted reference to the context that was acquired for the
   // request (and not released) in createRequest().
   releaseBaseContext(context);
-}
-
-/**********************************************************************/
-void setRequestHash(Request *request, const UdsChunkName *name)
-{
-  if (name == NULL) {
-    return;
-  }
-
-  request->hash = *name;
-#if NAMESPACES
-  xorNamespace(&request->hash, &request->context->namespaceHash);
-#endif /* NAMESPACES */
-  // Once the chunk name is known (either at launch time or after hashing), we
-  // can select a router to handle the request.
-  request->router = selectGridRouter(request->context->indexSession->grid,
-                                     &request->hash);
 }
 
 /**
@@ -447,12 +352,6 @@ static int64_t getTurnaroundTime(Request *request)
 static RequestQueue *getNextStageQueue(Request      *request,
                                        RequestStage  nextStage)
 {
-  if (nextStage == STAGE_HASH) {
-    // This request doesn't yet have a hash (chunk name) to dispatch to a
-    // router or index, so round-robin it to the next hash worker queue.
-    return getNextHashQueue(request);
-  }
-
   if (nextStage == STAGE_CALLBACK) {
     return request->context->callbackQueue;
   }
@@ -553,17 +452,8 @@ void updateRequestContextStats(Request *request)
       } else if (request->location == LOC_IN_SPARSE) {
         counters->postsFoundSparse++;
       }
-
-      if (request->dataLength > 0) {
-        counters->bytesFound += request->dataLength;
-        counters->postsFoundData++;
-      }
     } else {
       counters->postsNotFound++;
-      if (request->dataLength > 0) {
-        counters->bytesNotFound += request->dataLength;
-        counters->postsNotFoundData++;
-      }
     }
     break;
 

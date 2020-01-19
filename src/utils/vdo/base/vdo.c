@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.5/src/c++/vdo/base/vdo.c#1 $
+ * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/base/vdo.c#1 $
  */
 
 /*
@@ -643,13 +643,6 @@ void leaveRecoveryMode(VDO *vdo)
 }
 
 /**********************************************************************/
-void beat(VDO      *vdo __attribute__((unused)),
-          ThreadID  id __attribute__((unused)))
-{
-  // Do nothing, for now.
-}
-
-/**********************************************************************/
 bool setVDOCompressing(VDO *vdo, bool enableCompression)
 {
   bool stateChanged = compareAndSwapBool(&vdo->compressing, !enableCompression,
@@ -696,6 +689,30 @@ static const char *describeVDOState(VDOState state)
   default:
     return "normal";
   }
+}
+
+/**
+ * Tally the hash lock statistics from all the hash zones.
+ *
+ * @param vdo  The vdo to query
+ *
+ * @return The sum of the hash lock statistics from all hash zones
+ **/
+static HashLockStatistics getHashLockStatistics(const VDO *vdo)
+{
+  HashLockStatistics totals;
+  memset(&totals, 0, sizeof(totals));
+
+  const ThreadConfig *threadConfig = getThreadConfig(vdo);
+  for (ZoneCount zone = 0; zone < threadConfig->hashZoneCount; zone++) {
+    HashLockStatistics stats  = getHashZoneStatistics(vdo->hashZones[zone]);
+    totals.dedupeAdviceValid        += stats.dedupeAdviceValid;
+    totals.dedupeAdviceStale        += stats.dedupeAdviceStale;
+    totals.concurrentDataMatches    += stats.concurrentDataMatches;
+    totals.concurrentHashCollisions += stats.concurrentHashCollisions;
+  }
+
+  return totals;
 }
 
 /**
@@ -751,6 +768,7 @@ void getVDOStatistics(const VDO *vdo, VDOStatistics *stats)
   stats->slabSummary        = getSlabSummaryStatistics(getSlabSummary(depot));
   stats->refCounts          = getDepotRefCountsStatistics(depot);
   stats->blockMap           = getBlockMapStatistics(vdo->blockMap);
+  stats->hashLock           = getHashLockStatistics(vdo);
   stats->errors             = getVDOErrorStatistics(vdo);
   SlabCount slabTotal       = getDepotSlabCount(depot);
   stats->recoveryPercentage

@@ -17,9 +17,9 @@
 # 02110-1301, USA. 
 #
 
-# $Id: //eng/vdo-releases/magnesium-rhel7.5/src/packaging/src-dist/user/utils/vdo/user/Makefile#1 $
+# $Id: //eng/vdo-releases/magnesium-rhel7.6/src/packaging/src-dist/user/utils/vdo/user/Makefile#1 $
 
-VDO_VERSION = 6.1.0.168
+VDO_VERSION = 6.1.1.125
 
 UDS_DIR      = ../../uds
 VDO_BASE_DIR = ../base
@@ -83,11 +83,14 @@ USER_OBJS   = blockMapUtils.o  \
 # To add a new program X, add X to the variable PROGS (and possibly
 # also DIST_PROGS).
 
-PROGS = vdodumpconfig      \
+PROGS = vdodmeventd        \
+        vdodumpconfig      \
         vdoforcerebuild    \
         vdoformat          \
         vdoprepareupgrade  \
         vdoreadonly
+
+DMEVENT_LIB = libdevmapper-event-lvm2vdo.so
 
 .PHONY: all
 all: $(PROGS)
@@ -99,6 +102,10 @@ clean:
 	rm -f *.a *.so *.o core*
 	rm -fr $(DEPDIR) tmpdir
 	rm -f  $(PROGS)
+
+libuser.a: $(USER_OBJS)
+	$(RM) $@
+	$(AR) cr $@ $^
 
 INSTALL = install
 INSTALLOWNER ?= -o root -g root
@@ -125,14 +132,18 @@ install:
 		$(MV) $(DEPDIR)/$*.d.new $(DEPDIR)/$*.d ;	 \
 	fi
 
+vdodmeventd.o: CFLAGS += "-DPLUGIN_NAME=\"$(DMEVENT_LIB)\""
+
 $(DEPDIR)/%.d: %.c
 	@mkdir -p $(DEPDIR)
 	$(CC) $(CFLAGS) -MM -MF $@ -MP -MT $*.o $<
 
 .SECONDEXPANSION:
-$(PROGS): $$@.o $(USER_OBJS) $(DEPLIBS)
+$(PROGS): $$@.o libuser.a $(DEPLIBS)
 	echo "Building $@ from $^"
 	$(CC) $(LDFLAGS) $^ $(LDPRFLAGS) -o $@
+
+vdodmeventd: LDPRFLAGS += "-ldevmapper-event"
 
 ifneq ($(MAKECMDGOALS),clean)
 DEPSOURCES = $(wildcard *.c)

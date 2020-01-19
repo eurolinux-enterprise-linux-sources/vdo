@@ -20,10 +20,11 @@
 """
   Configuration - VDO manager configuration file handling
 
-  $Id: //eng/vdo-releases/magnesium-rhel7.5/src/python/vdo/vdomgmnt/Configuration.py#1 $
+  $Id: //eng/vdo-releases/magnesium-rhel7.6/src/python/vdo/vdomgmnt/Configuration.py#1 $
 
 """
 from . import ArgumentError, MgmntLogger
+from . import StateExitStatus
 from . import VDOService
 from utils import Command, runCommand
 from utils import FileLock, YAMLObject
@@ -35,7 +36,7 @@ import time
 import yaml
 
 
-class BadConfigurationFileError(Exception):
+class BadConfigurationFileError(StateExitStatus, Exception):
   """Exception raised to indicate an error in processing the
   configuration file, such as a parse error or missing data.
   """
@@ -43,8 +44,8 @@ class BadConfigurationFileError(Exception):
   ######################################################################
   # Overridden methods
   ######################################################################
-  def __init__(self, msg):
-    super(BadConfigurationFileError, self).__init__()
+  def __init__(self, msg, *args, **kwargs):
+    super(BadConfigurationFileError, self).__init__(*args, **kwargs)
     self._msg = msg
 
   ######################################################################
@@ -151,6 +152,20 @@ class Configuration(YAMLObject):
   def haveVdo(self, name):
     """Returns True if we have a VDO with a given name."""
     return name in self._vdos
+
+  ######################################################################
+  def isDeviceConfigured(self, device):
+    """Returns a boolean indicating if the configuration contains a VDO using
+    the specified device.
+
+    Both the specified device and the device from the vdos present in the
+    configuration are fully resolved for the check.
+    """
+    device = os.path.realpath(device)
+    for vdo in self._vdos:
+      if device == os.path.realpath(self._vdos[vdo].device):
+        return True
+    return False
 
   ######################################################################
   def persist(self):
@@ -270,6 +285,15 @@ class Configuration(YAMLObject):
     return specials
 
   ######################################################################
+  def _yamlUpdateFromInstance(self, instance):
+    super(Configuration, self)._yamlUpdateFromInstance(instance)
+
+    self._schemaVersion = instance.version
+    self._vdos = instance.vdos
+    for vdo in self._vdos:
+      self._vdos[vdo].setConfig(self)
+
+  ######################################################################
   def __init__(self, filename, readonly=True, mustExist=False):
     """Construct a Configuration.
 
@@ -283,6 +307,7 @@ class Configuration(YAMLObject):
     Raises:
       ArgumentError
     """
+    super(Configuration, self).__init__()
     self._vdos = {}
     self._filename = filename
     self._readonly = readonly
@@ -338,15 +363,25 @@ class Configuration(YAMLObject):
     try:
       conf = yaml.safe_load(fh)
     except yaml.scanner.ScannerError:
-      raise BadConfigurationFileError(_("Bad configuration file"))
+      raise BadConfigurationFileError(_("Not a valid configuration file"))
+
+    # Because we do indirection instantiation from the YAML load we need to
+    # call _yamlUpdateFromInstance().
     try:
-      self._schemaVersion = conf["config"].version
-    except (KeyError, TypeError):
-      raise BadConfigurationFileError(_("Bad configuration file"
-                                        " (missing 'config' section?)"))
-    self._vdos = conf["config"].vdos
-    for vdo in self._vdos:
-      self._vdos[vdo].setConfig(self)
+      config = conf["config"]
+    except KeyError:
+      raise BadConfigurationFileError(_("Not a valid configuration file"
+                                        " (missing 'config' section)"))
+    except Exception as ex:
+      self.log.debug("Not a valid configuration file: {0}".format(ex))
+      raise BadConfigurationFileError(_("Not a valid configuration file"))
+
+    try:
+      self._yamlUpdateFromInstance(config)
+    except Exception as ex:
+      self.log.debug("Not a valid configuration file: {0}".format(ex))
+      raise BadConfigurationFileError(_("Not a valid configuration file"))
+
     self._dirty = False
     return 0
 

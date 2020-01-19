@@ -20,7 +20,7 @@
 """
   MgmntUtils - miscellaneous utilities for the VDO manager
 
-  $Id: //eng/vdo-releases/magnesium-rhel7.5/src/python/vdo/vdomgmnt/MgmntUtils.py#1 $
+  $Id: //eng/vdo-releases/magnesium-rhel7.6/src/python/vdo/vdomgmnt/MgmntUtils.py#1 $
 
 """
 from .Utils import Utils

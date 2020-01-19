@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/request.h#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/request.h#6 $
  */
 
 #ifndef REQUEST_H
@@ -91,7 +91,6 @@ typedef enum {
  * life-cycle of a request.
  **/
 typedef enum {
-  STAGE_HASH,
   STAGE_TRIAGE,
   STAGE_INDEX,
   STAGE_CALLBACK,
@@ -132,12 +131,6 @@ typedef struct zoneMessage {
 } ZoneMessage;
 
 /**
- * A private structure that allows the requesting thread to
- * wait for synchronous requests to complete.
- **/
-typedef struct synchronousCallback SynchronousCallback;
-
-/**
  * Request context for queuing throughout the uds pipeline
  **/
 struct request {
@@ -175,8 +168,6 @@ struct request {
   RequestAction  action;        // the action for the index to perform
   unsigned int   zoneNumber;    // the zone for this request to use
   UdsCookie      cookie;
-  void          *data;          // actual data
-  size_t         dataLength;    // length of *data
   IndexRegion    location;      // if and where the block was found
 
   bool             slLocationKnown; // slow lane has determined a location
@@ -192,14 +183,11 @@ typedef void (*RequestRestarter)(Request *);
  * Create an index request.
  *
  * @param contextId   The id of the context making the request
- * @param contextType The type of context making the request
  * @param requestPtr  A pointer to hold the new request
  *
  * @return            UDS_SUCCESS or an error code
  **/
-int createRequest(unsigned int   contextId,
-                  ContextType    contextType,
-                  Request      **requestPtr)
+int createRequest(unsigned int contextId, Request **requestPtr)
   __attribute__((warn_unused_result));
 
 /**
@@ -208,27 +196,21 @@ int createRequest(unsigned int   contextId,
  * returning.
  *
  * @param contextId       The id of the context of the request
- * @param contextType     The type of the context of the request
  * @param callbackType    The type of the request
  * @param update          If <code>true</code>, move any found record
  *                        to the front of the index on a query request
  * @param chunkName       The name of the chunk in question (may be NULL)
  * @param cookie          Opaque, request specific client data (may be NULL)
  * @param metadata        The metadata for the request (may be NULL)
- * @param dataLength      The length of the data to be hashed
- * @param data            The chunk data (may be NULL)
  *
  * @return UDS_SUCCESS or an error code
  **/
-int launchClientRequest(unsigned int         contextId,
-                        ContextType          contextType,
-                        UdsCallbackType      callbackType,
-                        bool                 update,
-                        const UdsChunkName  *chunkName,
-                        UdsCookie            cookie,
-                        void                *metadata,
-                        size_t               dataLength,
-                        const void          *data)
+int launchClientRequest(unsigned int        contextId,
+                        UdsCallbackType     callbackType,
+                        bool                update,
+                        const UdsChunkName *chunkName,
+                        UdsCookie           cookie,
+                        void               *metadata)
   __attribute__((warn_unused_result));
 
 /**
@@ -315,15 +297,6 @@ int launchZoneControlMessage(RequestAction  action,
  * @param request The request to free
  **/
 void freeRequest(Request *request);
-
-/**
- * Set the chunk name hash in the request, XORing it with the namespace in
- * the request context.
- *
- * @param request  The request to modify
- * @param name     The hash value to copy (no-op if NULL)
- **/
-void setRequestHash(Request *request, const UdsChunkName *name);
 
 /**
  * Enqueue a request for the next stage of the pipeline. If there is more than

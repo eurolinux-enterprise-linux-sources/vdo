@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.5/src/c++/vdo/user/vdoConfig.c#1 $
+ * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/user/vdoConfig.c#1 $
  */
 
 #include <uuid/uuid.h>
@@ -354,7 +354,7 @@ static int updateVDOSuperBlockState(PhysicalLayer *layer,
 
   if (requireReadOnly && !inReadOnlyMode(vdo)) {
     freeVDO(&vdo);
-    return logErrorWithStringError(VDO_NOT_CLEAN,
+    return logErrorWithStringError(VDO_NOT_READ_ONLY,
                                    "Can't force rebuild on a normal VDO");
   }
 

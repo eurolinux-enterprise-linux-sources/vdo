@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.5/src/c++/vdo/base/statusCodes.h#2 $
+ * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/base/statusCodes.h#1 $
  */
 
 #ifndef STATUS_CODES_H
@@ -72,8 +72,8 @@ enum vdoStatusCodes {
   VDO_UNKNOWN_PARTITION,
   /** a partition already exists with a given id */
   VDO_PARTITION_EXISTS,
-  /** the VDO is not in a clean state */
-  VDO_NOT_CLEAN,
+  /** the VDO is not in read-only mode */
+  VDO_NOT_READ_ONLY,
   /** physical block growth of too few blocks */
   VDO_INCREMENT_TOO_SMALL,
   /** incorrect checksum */

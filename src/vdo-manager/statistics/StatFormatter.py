@@ -20,7 +20,7 @@
 """
   DisplaySpec
 
-  $Id: //eng/vdo-releases/magnesium-rhel7.5/src/python/vdo/statistics/StatFormatter.py#1 $
+  $Id: //eng/vdo-releases/magnesium-rhel7.6/src/python/vdo/statistics/StatFormatter.py#1 $
 """
 
 import sys

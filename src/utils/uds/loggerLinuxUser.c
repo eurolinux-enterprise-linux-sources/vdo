@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/userLinux/uds/loggerLinuxUser.c#1 $
+ * $Id: //eng/uds-releases/flanders/userLinux/uds/loggerLinuxUser.c#3 $
  */
 
 #include "logger.h"

@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/requestQueue.c#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/requestQueue.c#4 $
  */
 
 #include "requestQueue.h"
@@ -293,8 +293,7 @@ static int initializeQueue(RequestQueue          *queue,
     return result;
   }
 
-  result = createThread(requestQueueWorker, queue, queueName, 0,
-                        &queue->thread);
+  result = createThread(requestQueueWorker, queue, queueName, &queue->thread);
   if (result != UDS_SUCCESS) {
     return result;
   }

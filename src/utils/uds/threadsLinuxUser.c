@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/userLinux/uds/threadsLinuxUser.c#1 $
+ * $Id: //eng/uds-releases/flanders/userLinux/uds/threadsLinuxUser.c#5 $
  */
 
 #include "threads.h"
@@ -152,7 +152,6 @@ static void *threadStarter(void *arg)
 int createThread(void      (*threadFunc)(void *),
                  void       *threadData,
                  const char *name,
-                 size_t      stackLimit,
                  pthread_t  *newThread)
 {
   ThreadStartInfo *tsi;
@@ -169,14 +168,6 @@ int createThread(void      (*threadFunc)(void *),
   if (result != UDS_SUCCESS) {
     FREE(tsi);
     return UDS_ENOTHREADS;
-  }
-  if (stackLimit != 0) {
-    result = setThreadStackSize(&attr, stackLimit);
-    if (result != UDS_SUCCESS) {
-      destroyThreadAttr(&attr);
-      FREE(tsi);
-      return UDS_ENOTHREADS;
-    }
   }
   result = pthread_create(newThread, &attr, threadStarter, tsi);
   if (result != 0) {
@@ -302,4 +293,41 @@ int yieldScheduler(void)
   }
 
   return UDS_SUCCESS;
+}
+
+/**********************************************************************/
+int initializeSynchronousRequest(SynchronousCallback *callback)
+{
+  int result = initCond(&callback->condition);
+  if (result != UDS_SUCCESS) {
+    return result;
+  }
+  result = initMutex(&callback->mutex);
+  if (result != UDS_SUCCESS) {
+    destroyCond(&callback->condition);
+    return result;
+  }
+  callback->complete = false;
+  return UDS_SUCCESS;
+}
+
+/**********************************************************************/
+void awaitSynchronousRequest(SynchronousCallback *callback)
+{
+  lockMutex(&callback->mutex);
+  while (!callback->complete) {
+    waitCond(&callback->condition, &callback->mutex);
+  }
+  unlockMutex(&callback->mutex);
+  destroyCond(&callback->condition);
+  destroyMutex(&callback->mutex);
+}
+
+/**********************************************************************/
+void awakenSynchronousRequest(SynchronousCallback *callback)
+{
+  lockMutex(&callback->mutex);
+  callback->complete = true;
+  broadcastCond(&callback->condition);
+  unlockMutex(&callback->mutex);
 }

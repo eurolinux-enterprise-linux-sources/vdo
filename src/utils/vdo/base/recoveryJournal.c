@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.5/src/c++/vdo/base/recoveryJournal.c#2 $
+ * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/base/recoveryJournal.c#1 $
  */
 
 #include "recoveryJournal.h"
@@ -1170,7 +1170,6 @@ static void completeWrite(VDOCompletion *completion)
   journal->events.blocks.committed  += 1;
   journal->events.entries.committed += block->entriesInCommit;
   block->committing                  = false;
-  block->flushBeforeWrite            = false;
 
   // If this block is the latest block to be acknowledged, record that fact.
   if (block->header->sequenceNumber > journal->lastWriteAcknowledged) {
@@ -1234,11 +1233,18 @@ static int addEntries(RecoveryJournalBlock *block)
   while (hasWaiters(&block->entryWaiters)) {
     DataVIO *dataVIO
       = waiterAsDataVIO(dequeueNextWaiter(&block->entryWaiters));
-
-    if (dataVIO->isPartialWrite) {
+    if (dataVIO->operation.type == DATA_INCREMENT) {
       // In order to not lose committed sectors of this partial write, we must
       // flush before the partial write entries are committed.
-      block->flushBeforeWrite = true;
+      block->hasPartialWriteEntry = (block->hasPartialWriteEntry
+                                     || dataVIO->isPartialWrite);
+      /*
+       * In order to not lose acknowledged writes with the FUA flag set, we
+       * must issue a flush to cover the data write and also all previous
+       * journal writes, and we must issue a FUA on the journal write.
+       */
+      block->hasFUAEntry = (block->hasFUAEntry
+                            || vioRequiresFlushAfter(dataVIOAsVIO(dataVIO)));
     }
 
     // Encode the entry.
@@ -1310,17 +1316,23 @@ static void writeBlock(RecoveryJournal *journal, RecoveryJournalBlock *block)
   block->committing              = true;
 
   /*
-   * In sync mode, we need to make sure all the data being mapped to by
-   * this block is stable on disk, and also that this block is stable
-   * before we acknowledge the VIOs being mapped in it. Hence, in sync
-   * mode, we flush before and after each RJ write.
+   * In sync mode, when we are writing an increment entry for a request with
+   * FUA, or when making the increment entry for a partial write, we need to
+   * make sure all the data being mapped to by this block is stable on disk
+   * and also that the recovery journal is stable up to the current block, so
+   * we must flush before writing.
+   *
+   * In sync mode, and for FUA, we also need to make sure that the write we
+   * are doing is stable, so we issue the write with FUA.
    */
-  PhysicalLayer *layer = journal->completion.layer;
-  bool syncMode = !layer->isFlushRequired(layer);
-  launchWriteMetadataVIOWithFlush(block->vio, blockPBN,
-                                  completeWrite, handleWriteError,
-                                  syncMode || block->flushBeforeWrite,
-                                  syncMode);
+  PhysicalLayer *layer        = journal->completion.layer;
+  bool           sync         = !layer->isFlushRequired(layer);
+  bool           fua          = sync || block->hasFUAEntry;
+  bool           flushBefore  = fua || block->hasPartialWriteEntry;
+  block->hasFUAEntry          = false;
+  block->hasPartialWriteEntry = false;
+  launchWriteMetadataVIOWithFlush(block->vio, blockPBN, completeWrite,
+                                  handleWriteError, flushBefore, fua);
 }
 
 /**********************************************************************/
@@ -1395,12 +1407,20 @@ static void reapRecoveryJournal(RecoveryJournal *journal)
     return;
   }
 
-  // If the block map head will advance, we must flush any block map page
-  // modified by the entries we are reaping. If the slab journal head will
-  // advance, we must flush the slab summary update covering the slab journal
-  // that just released some lock.
-  journal->reaping = true;
-  launchFlush(journal->flushVIO, completeReaping, handleFlushError);
+  PhysicalLayer *layer = vioAsCompletion(journal->flushVIO)->layer;
+  if (layer->isFlushRequired(layer)) {
+    /*
+     * If the block map head will advance, we must flush any block map page
+     * modified by the entries we are reaping. If the slab journal head will
+     * advance, we must flush the slab summary update covering the slab journal
+     * that just released some lock.
+     */
+    journal->reaping = true;
+    launchFlush(journal->flushVIO, completeReaping, handleFlushError);
+    return;
+  }
+
+  finishReaping(journal);
 }
 
 /**********************************************************************/

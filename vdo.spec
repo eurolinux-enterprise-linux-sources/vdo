@@ -1,19 +1,20 @@
-%global commit       6a45c632a0865b97dc67590ee5dd7cd6b261056c
-%global gittag       6.1.0.168
+%global commit       c0b89fedc22d2af62abe90c4ed5822c02c843d21
+%global gittag       6.1.1.125
 %global shortcommit  %(c=%{commit}; echo ${c:0:7})
-%define spec_release 18
+%define spec_release 3
 #
 #
 #
 Summary: Management tools for Virtual Data Optimizer
 Name: vdo
-Version: 6.1.0.168
-Release: %{spec_release}
+Version: %{gittag}
+Release: %{spec_release}%{?dist}
 License: GPLv2
 Source0: https://github.com/dm-vdo/%{name}/archive/%{commit}/%{name}-%{shortcommit}.tar.gz
 URL: http://github.com/dm-vdo/vdo
-Distribution: RHEL 7.5
+Distribution: RHEL 7.6
 Requires: PyYAML >= 3.10
+Requires: libuuid >= 2.23
 Requires: kmod-kvdo >= 6.1
 Requires: lvm2 >= 2.02.171
 Provides: kvdo-kmod-common = %{version}
@@ -26,14 +27,16 @@ ExcludeArch: ppc64le
 ExcludeArch: aarch64
 ExcludeArch: i686
 BuildRequires: gcc
+BuildRequires: device-mapper-event-devel
 BuildRequires: libuuid-devel
 BuildRequires: python
 BuildRequires: python-devel
 BuildRequires: systemd
 BuildRequires: valgrind-devel
 BuildRequires: zlib-devel
+%{?systemd_requires}
 
-# Disable an automatic dependency due to a file in examples/nagios.
+# Disable an automatic dependency due to a file in examples/monitor
 %define __requires_exclude perl
 
 %description
@@ -52,23 +55,27 @@ make
 make install DESTDIR=$RPM_BUILD_ROOT INSTALLOWNER= bindir=%{_bindir} \
   defaultdocdir=%{_defaultdocdir} name=%{name} \
   python_sitelib=%{python_sitelib} mandir=%{_mandir} \
-  unitdir=%{_unitdir}
+  unitdir=%{_unitdir} presetdir=%{_presetdir}
 
 %post
-systemctl enable vdo.service || :
+%systemd_post vdo.service
 
 %preun
-systemctl disable vdo.service || :
+%systemd_preun vdo.service
+
+%postun
+%systemd_postun_with_restart vdo.service
 
 %files
 #defattr(-,root,root)
 %{_bindir}/vdo
-%{_bindir}/vdostats
+%{_bindir}/vdodmeventd
 %{_bindir}/vdodumpconfig
 %{_bindir}/vdoforcerebuild
 %{_bindir}/vdoformat
 %{_bindir}/vdoprepareupgrade
 %{_bindir}/vdoreadonly
+%{_bindir}/vdostats
 %dir %{python_sitelib}/%{name}
 %dir %{python_sitelib}/%{name}/vdomgmnt/
 %{python_sitelib}/%{name}/vdomgmnt/CommandLock.py
@@ -83,6 +90,9 @@ systemctl disable vdo.service || :
 %{python_sitelib}/%{name}/vdomgmnt/Defaults.py
 %{python_sitelib}/%{name}/vdomgmnt/Defaults.pyc
 %{python_sitelib}/%{name}/vdomgmnt/Defaults.pyo
+%{python_sitelib}/%{name}/vdomgmnt/ExitStatusMixins.py
+%{python_sitelib}/%{name}/vdomgmnt/ExitStatusMixins.pyc
+%{python_sitelib}/%{name}/vdomgmnt/ExitStatusMixins.pyo
 %{python_sitelib}/%{name}/vdomgmnt/KernelModuleService.py
 %{python_sitelib}/%{name}/vdomgmnt/KernelModuleService.pyc
 %{python_sitelib}/%{name}/vdomgmnt/KernelModuleService.pyo
@@ -164,6 +174,7 @@ systemctl disable vdo.service || :
 %{python_sitelib}/%{name}/utils/__init__.pyc
 %{python_sitelib}/%{name}/utils/__init__.pyo
 %{_unitdir}/vdo.service
+%{_presetdir}/97-vdo.preset
 %dir %{_defaultdocdir}/%{name}
 %license %{_defaultdocdir}/%{name}/COPYING
 %dir %{_defaultdocdir}/%{name}/examples
@@ -173,31 +184,96 @@ systemctl disable vdo.service || :
 %doc %{_defaultdocdir}/%{name}/examples/ansible/test_vdocreate_alloptions.yml
 %doc %{_defaultdocdir}/%{name}/examples/ansible/test_vdoremove.yml
 %doc %{_defaultdocdir}/%{name}/examples/ansible/vdo.py
+# Fedora doesn't byte-compile the examples.
+%if 0%{?rhel}
 %doc %{_defaultdocdir}/%{name}/examples/ansible/vdo.pyc
 %doc %{_defaultdocdir}/%{name}/examples/ansible/vdo.pyo
-%dir %{_defaultdocdir}/%{name}/examples/nagios
-%doc %{_defaultdocdir}/%{name}/examples/nagios/nagios_check_vdostats_logicalSpace.pl
-%doc %{_defaultdocdir}/%{name}/examples/nagios/nagios_check_vdostats_physicalSpace.pl
-%doc %{_defaultdocdir}/%{name}/examples/nagios/nagios_check_vdostats_savingPercent.pl
+%endif
+%dir %{_defaultdocdir}/%{name}/examples/monitor
+%doc %{_defaultdocdir}/%{name}/examples/monitor/monitor_check_vdostats_logicalSpace.pl
+%doc %{_defaultdocdir}/%{name}/examples/monitor/monitor_check_vdostats_physicalSpace.pl
+%doc %{_defaultdocdir}/%{name}/examples/monitor/monitor_check_vdostats_savingPercent.pl
 %dir %{_defaultdocdir}/%{name}/examples/systemd
 %doc %{_defaultdocdir}/%{name}/examples/systemd/VDO.mount.example
 %{_mandir}/man8/vdo.8.gz
-%{_mandir}/man8/vdostats.8.gz
+%{_mandir}/man8/vdodmeventd.8.gz
 %{_mandir}/man8/vdodumpconfig.8.gz
 %{_mandir}/man8/vdodumpmetadata.8.gz
 %{_mandir}/man8/vdoforcerebuild.8.gz
 %{_mandir}/man8/vdoformat.8.gz
-
+%{_mandir}/man8/vdostats.8.gz
 
 %changelog
-* Sun Apr 29 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.0.168-18
-- Bumped NVR for z-stream candidate
+* Fri Sep 14 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.1.125-3
+- Re-sync with the 'kmod-kvdo' package.
+- Related: rhbz#1628318
 
-* Sun Apr 29 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.0.168-17
-- Updated source to use GitHub
-- Fixed bug where VDO would always be created with a dense index even when
-  a sparse index was requested.
-- Resolves: rhbz#1572496
+* Sun Jul 29 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.1.120-3
+- Improved error messages in the vdo script when failing to stop a device.
+- Resolves: rhbz#1511106
+- Improved man pages.
+- Resolves: rhbz#1572640
+- Modified vdo script to ignore (but preserve) unrecognised parameters in
+  the vdo config file so that config files are compatible across versions.
+- Resolves: rhbz#1604060
+- Updated Ansible module to change block map cache size on existing volumes
+- Resolves: rhbz#1541170
+
+* Sun Jul 15 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.1.111-3
+- Added support for issuing fullness warnings via dmeventd
+- rhbz#1519307
+- Provided missing error code to text translation for vdoDumpConfig.
+- Resolves: rhbz#1595129
+- Improved error reporting when using pvcreate in the vdo script to check
+  for pre-existing devices when creating a VDO volume.
+- Resolves: rhbz#1557464
+
+* Wed Jun 20 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.1.99-2
+- Modified the vdo script to not allow creation of a VDO device on top of
+  an already running VDO device.
+- Resolves: rhbz#1572640
+- Made the ordering of the output of vdo list stable.
+- Resolves: rhbz#1589363
+- Added the proper dist tag
+- Resolves: rhbz#1588043
+
+* Fri May 11 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.1.84-1
+- Improved and corrected man pages.
+- Improved error handling in vdo script when stopping volumes in use.
+- Resolves: rhbz#1511106
+- Modified the vdo script to return more specific error exit codes.
+- Resolves: rhbz#1543954
+- Improved detection of existing formats when creating new volumes.
+- Resolves: rhbz#1557464
+- Improved VDO Ansible testing playbooks.
+- Fixed compilation errors on newer versions of GCC.
+- Removed the --physical-size option to vdoformat since VDO now always uses
+  the entire device on which it resides.
+- Modified vdo script to use /dev/disk/by-id to describe the location of
+  VDO volumes when possible.
+- Fixed a bug where VDO would always be created with a dense index even
+  when a sparse index was requested.
+- Resolves: rhbz#1570156
+- Modified the vdo script to accept decimal points or commas when
+  specifying the --indexMem option.
+- Resolves: rhbz#1552146
+- Changed vdo script to not accept --vdoSlabSize=0 as a way of specifying
+  the default since it was confusing. The default can be obtained by merely
+  omitting the parameter entirely.
+- Resolves: rhbz#1564181
+- Modified the vdo script to require the --force option to remove a VDO
+  whose underlying device is not present.
+- Resolves: rhbz#1535476
+
+* Thu May 10 2018 - Andy Walsh <awalsh@redhat.com> - 6.1.1.24-1
+- Rebased to 6.1.1 branch from github
+- Resolves: rhbz#1576701
+- Removed obsolete nagios module.
+- Modified spec files to use systemd macros
+- Resolves: rhbz#1531111
+- Updated the vdo.8 man page
+- Resolves: rhbz#1547786
+- Improved some error messages
 
 * Fri Feb 16 2018 - Joseph Chapman <jochapma@redhat.com> - 6.1.0.149-16
 - Sync mode is safe if underlying storage changes to requiring flushes

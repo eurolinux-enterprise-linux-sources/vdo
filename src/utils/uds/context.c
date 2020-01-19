@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/uds-releases/flanders-rhel7.5/src/uds/context.c#1 $
+ * $Id: //eng/uds-releases/flanders/src/uds/context.c#9 $
  */
 
 #include "context.h"
@@ -32,13 +32,11 @@
 #include "parameter.h"
 #include "permassert.h"
 #include "requestLimit.h"
-#include "sha256.h"
 #include "threads.h"
 #include "timeUtils.h"
 #include "udsState.h"
 
 enum {
-  DEFAULT_CHUNK_SIZE    = 4096,
   DEFAULT_REQUEST_LIMIT = 1024,
   MAX_REQUEST_LIMIT     = 2048
 };
@@ -89,10 +87,6 @@ static void handleCallbacks(Request *request)
     return;
   }
 
-#if NAMESPACES
-  xorNamespace(&request->hash, &request->context->namespaceHash);
-#endif /* NAMESPACES */
-
   if (request->status == UDS_SUCCESS) {
     // Measure the turnaround time of this request and include that time,
     // along with the rest of the request, in the context's StatCounters.
@@ -112,10 +106,23 @@ static void handleCallbacks(Request *request)
   }
 
   if (request->context->hasCallback) {
+    UdsBlockAddress duplicateAddress = NULL;
+    if ((request->type != UDS_DELETE)) {
+      duplicateAddress = &request->newMetadata.data;
+    }
+    UdsBlockAddress canonicalAddress = NULL;
+    if (request->location != LOC_UNAVAILABLE) {
+      canonicalAddress = &request->oldMetadata.data;
+    }
+    UdsContext *context = request->context;
+    UdsBlockContext blockContext = { .id = context->id };
     // Allow the callback routine to create a new request if necessary without
     // blocking our thread. "request" is just a handy non-null value here.
     setCallbackThread(request);
-    request->context->callbackHandler(request);
+    context->callbackFunction(blockContext, request->type, request->status,
+                              request->cookie, duplicateAddress,
+                              canonicalAddress, &request->hash,
+                              context->callbackArgument);
     setCallbackThread(NULL);
   }
 
@@ -123,52 +130,21 @@ static void handleCallbacks(Request *request)
 }
 
 /**********************************************************************/
-const char *contextTypeToString(ContextType contextType)
+static int validateMetadataSize(unsigned int metadataSize)
 {
-  if (contextType == BLOCK_CONTEXT) {
-    return "block";
-  } else {
-    return "(unknown)";
-  }
-}
-
-/**********************************************************************/
-static int validateMetadataSize(int contextType, unsigned int metadataSize)
-{
-  unsigned int maxSize;
-  switch (contextType) {
-  case BLOCK_CONTEXT:
-    maxSize = UDS_MAX_BLOCK_DATA_SIZE;
-    break;
-  default:
-    return logWarningWithStringError(UDS_INVALID_ARGUMENT,
-                                     "cannot validate metadata for invalid "
-                                     "context type: %d", contextType);
-  }
-
-  if (metadataSize <= maxSize) {
+  if (metadataSize <= UDS_MAX_BLOCK_DATA_SIZE) {
     return UDS_SUCCESS;
   }
-
   return logWarningWithStringError(UDS_INVALID_METADATA_SIZE,
-                                   "invalid %s context metadata size: %u",
-                                   contextTypeToString(contextType),
-                                   metadataSize);
+                                   "invalid metadata size: %u", metadataSize);
 }
 
 /**********************************************************************/
-int openContext(UdsIndexSession     session,
-#if NAMESPACES
-                const UdsNamespace *namespace,
-#endif /* NAMESPACES */
-                unsigned int        metadataSize,
-                MetadataEncoder     metadataEncoder,
-                unsigned int        chunkSize,
-                ContextType         contextType,
-                CallbackHandler     callbackHandler,
-                unsigned int       *contextID)
+int openContext(UdsIndexSession  session,
+                unsigned int     metadataSize,
+                unsigned int    *contextID)
 {
-  int result = validateMetadataSize(contextType, metadataSize);
+  int result = validateMetadataSize(metadataSize);
   if (result != UDS_SUCCESS) {
     return result;
   }
@@ -201,15 +177,7 @@ int openContext(UdsIndexSession     session,
   }
 
   UdsContext *context = NULL;
-#if NAMESPACES
-  result = makeBaseContext(indexSession, namespace, metadataSize,
-                           metadataEncoder, chunkSize, contextType,
-                           callbackHandler, &context);
-#else
-  result = makeBaseContext(indexSession, metadataSize,
-                           metadataEncoder, chunkSize, contextType,
-                           callbackHandler, &context);
-#endif /* NAMESPACES */
+  result = makeBaseContext(indexSession, metadataSize, &context);
   if (result != UDS_SUCCESS) {
     releaseSessionGroup(contextGroup);
     releaseIndexSession(indexSession);
@@ -223,8 +191,7 @@ int openContext(UdsIndexSession     session,
                                  &context->session,
                                  (SessionContents) context);
   context->id = *contextID;
-  logDebug("Opened %s context (%u)", contextTypeToString(context->type),
-           *contextID);
+  logDebug("Opened context (%u)", *contextID);
   releaseBaseContext(context);
   releaseSessionGroup(contextGroup);
   unlockGlobalStateMutex();
@@ -232,19 +199,11 @@ int openContext(UdsIndexSession     session,
 }
 
 /**********************************************************************/
-static int checkContext(UdsContext *context, ContextType contextType)
+static int checkContext(UdsContext *context)
 {
   switch (context->contextState) {
     case UDS_CS_READY:
-      // verify context type
-      if (context->type != contextType) {
-        // trying to use a context with a different API than it supports
-        return logErrorWithStringError(UDS_WRONG_CONTEXT_TYPE,
-                                       "Unsupported context type");
-      } else {
-        return checkIndexSession(context->indexSession);
-      }
-      break;
+      return checkIndexSession(context->indexSession);
     case UDS_CS_DISABLED:
       return UDS_DISABLED;
     default:
@@ -253,9 +212,7 @@ static int checkContext(UdsContext *context, ContextType contextType)
 }
 
 /**********************************************************************/
-int getBaseContext(unsigned int   contextId,
-                   ContextType    contextType,
-                   UdsContext   **contextPtr)
+int getBaseContext(unsigned int contextId, UdsContext **contextPtr)
 {
   Session *session;
   int result = getSession(getContextGroup(), contextId, &session);
@@ -264,7 +221,7 @@ int getBaseContext(unsigned int   contextId,
   }
 
   UdsContext *context = (UdsContext *) getSessionContents(session);
-  result = checkContext(context, contextType);
+  result = checkContext(context);
   if (result != UDS_SUCCESS) {
     releaseSession(session);
     return result;
@@ -322,7 +279,7 @@ void freeContext(UdsContext *context)
 }
 
 /**********************************************************************/
-int closeContext(unsigned int contextId, ContextType contextType)
+int closeContext(unsigned int contextId)
 {
   SessionGroup *contextGroup = getContextGroup();
   int result = acquireSessionGroup(contextGroup);
@@ -338,15 +295,9 @@ int closeContext(unsigned int contextId, ContextType contextType)
   }
 
   UdsContext *context = (UdsContext *) getSessionContents(session);
-  if (context->type != contextType) {
-    releaseSessionGroup(contextGroup);
-    return logErrorWithStringError(UDS_WRONG_CONTEXT_TYPE,
-                                   "Unsupported context type");
-  }
 
   finishSession(contextGroup, &context->session);
-  logDebug("Closed %s context (%u)", contextTypeToString(context->type),
-           contextId);
+  logDebug("Closed context (%u)", contextId);
 
   freeContext(context);
   releaseSessionGroup(contextGroup);
@@ -354,67 +305,30 @@ int closeContext(unsigned int contextId, ContextType contextType)
 }
 
 /**********************************************************************/
-int makeBaseContext(IndexSession        *indexSession,
-#if NAMESPACES
-                    const UdsNamespace  *namespace,
-#endif /* NAMESPACES */
-                    unsigned int         metadataSize,
-                    MetadataEncoder      metadataEncoder,
-                    unsigned int         chunkSize,
-                    ContextType          contextType,
-                    CallbackHandler      callbackHandler,
-                    UdsContext         **contextPtr)
+int makeBaseContext(IndexSession  *indexSession,
+                    unsigned int   metadataSize,
+                    UdsContext   **contextPtr)
 {
   UdsContext *context;
-  int result
-    = ALLOCATE(1, UdsContext, "empty context", &context);
+  int result = ALLOCATE(1, UdsContext, "empty context", &context);
   if (result != UDS_SUCCESS) {
     return result;
   }
 
-  context->type               = contextType;
   context->indexSession       = indexSession;
   context->contextState       = UDS_CS_READY;
   context->metadataSize       = metadataSize;
-  context->metadataEncoder    = metadataEncoder;
-  context->chunkSize          = ((chunkSize > 0)
-                                 ? chunkSize : DEFAULT_CHUNK_SIZE);
-  context->callbackHandler    = callbackHandler;
-  context->chunkNameGenerator = udsCalculateSHA256ChunkName;
-  relaxedStore32(&context->hashQueueRotor, 0);
 
   // Make sure we've captured any environment override of
   // timeRequestTurnaround before assigning it to the context.
 
   UdsParameterValue value;
-  if ((udsGetParameter(UDS_TIME_REQUEST_TURNAROUND, &value) == UDS_SUCCESS) &&
-      value.type == UDS_PARAM_TYPE_BOOL)
-  {
+  if ((udsGetParameter(UDS_TIME_REQUEST_TURNAROUND, &value) == UDS_SUCCESS)
+      && (value.type == UDS_PARAM_TYPE_BOOL)) {
     context->timeRequestTurnaround = value.value.u_bool;
   } else {
     context->timeRequestTurnaround = false;
   }
-
-#if NAMESPACES
-  if ((namespace == NULL)
-      || ((namespace->name == NULL) && namespace->length == 0)) {
-    memset(&context->namespaceHash.hash, 0,
-           sizeof(context->namespaceHash.hash));
-  } else if (namespace->name == NULL) {
-    freeContext(context);
-    return logErrorWithStringError(UDS_BAD_NAMESPACE,
-                                   "Null namespace name has non-zero length");
-  } else {
-    if ((int) UDS_CHUNK_NAME_SIZE == (int) SHA256_HASH_LEN) {
-      sha256(namespace->name, namespace->length, context->namespaceHash.hash);
-    } else {
-      unsigned char hash[SHA256_HASH_LEN];
-      sha256(namespace->name, namespace->length, hash);
-      memcpy(context->namespaceHash.hash, hash,
-             sizeof(context->namespaceHash.hash));
-    }
-  }
-#endif /* NAMESPACES */
 
   result = makeRequestLimit(DEFAULT_REQUEST_LIMIT, &context->requestLimit);
   if (result != UDS_SUCCESS) {
@@ -441,10 +355,10 @@ void flushBaseContext(UdsContext *context)
 }
 
 /**********************************************************************/
-int flushContext(unsigned int contextId, ContextType contextType)
+int flushContext(unsigned int contextId)
 {
   UdsContext *context;
-  int result = getBaseContext(contextId, contextType, &context);
+  int result = getBaseContext(contextId, &context);
   if (result != UDS_SUCCESS) {
     return result;
   }
@@ -455,9 +369,7 @@ int flushContext(unsigned int contextId, ContextType contextType)
 }
 
 /**********************************************************************/
-int getConfiguration(unsigned int      contextId,
-                     ContextType       contextType,
-                     UdsConfiguration *userConfig)
+int getConfiguration(unsigned int contextId, UdsConfiguration *userConfig)
 {
   if (userConfig == NULL) {
     return logErrorWithStringError(UDS_CONF_PTR_REQUIRED,
@@ -465,7 +377,7 @@ int getConfiguration(unsigned int      contextId,
   }
 
   UdsContext *context;
-  int         result = getBaseContext(contextId, contextType, &context);
+  int result = getBaseContext(contextId, &context);
   if (result != UDS_SUCCESS) {
     return logErrorWithStringError(result, "getBaseContext() failed");
   }
@@ -486,9 +398,7 @@ int getConfiguration(unsigned int      contextId,
  * context; external version (aside from the per-context-type
  * wrapping) with range checks and locking.
  **/
-int setRequestQueueLimit(unsigned int contextId,
-                         ContextType  contextType,
-                         unsigned int maxRequests)
+int setRequestQueueLimit(unsigned int contextId, unsigned int maxRequests)
 {
   if (maxRequests > MAX_REQUEST_LIMIT) {
     return logWarningWithStringError(
@@ -500,7 +410,7 @@ int setRequestQueueLimit(unsigned int contextId,
   }
 
   UdsContext *context;
-  int result = getBaseContext(contextId, contextType, &context);
+  int result = getBaseContext(contextId, &context);
   if (result != UDS_SUCCESS) {
     return result;
   }
@@ -512,69 +422,7 @@ int setRequestQueueLimit(unsigned int contextId,
 }
 
 /**********************************************************************/
-int setChunkNameAlgorithm(unsigned int     contextId,
-                          ContextType      contextType,
-                          UdsHashAlgorithm algorithm)
-{
-  UdsContext *context;
-  int result = getBaseContext(contextId, contextType, &context);
-  if (result != UDS_SUCCESS) {
-    return result;
-  }
-
-  switch (algorithm) {
-  case UDS_HASH_ALG_SHA256:
-    context->chunkNameGenerator = udsCalculateSHA256ChunkName;
-    break;
-
-  case UDS_HASH_ALG_MURMUR3:
-    context->chunkNameGenerator = murmurGenerator;
-    break;
-
-  default:
-    // a more specific error code would be good
-    result = logWarningWithStringError(UDS_UNKNOWN_ERROR,
-                                       "invalid hash algorithm selection");
-  }
-
-  releaseBaseContext(context);
-  return result;
-}
-
-/**********************************************************************/
-UdsChunkName generateChunkName(unsigned int     contextId,
-                               ContextType      contextType,
-                               const void      *data,
-                               size_t           size)
-{
-  UdsChunkName chunkName;
-  UdsContext *context;
-  int result = getBaseContext(contextId, contextType, &context);
-  if (result != UDS_SUCCESS) {
-    return udsCalculateSHA256ChunkName(data, size);
-  }
-
-  chunkName = context->chunkNameGenerator(data, size);
-
-  releaseBaseContext(context);
-  return chunkName;
-}
-
-/**
- * Divide two numbers, returning zero if the divisor is zero.
- **/
-static uint64_t safeDivide(uint64_t dividend, uint64_t divisor)
-{
-  if (divisor == 0) {
-    return 0;
-  }
-  return dividend / divisor;
-}
-
-/**********************************************************************/
-int getContextIndexStats(unsigned int   contextId,
-                         ContextType    contextType,
-                         UdsIndexStats *stats)
+int getContextIndexStats(unsigned int contextId, UdsIndexStats *stats)
 {
   if (stats == NULL) {
     return logErrorWithStringError(UDS_INDEX_STATS_PTR_REQUIRED,
@@ -582,7 +430,7 @@ int getContextIndexStats(unsigned int   contextId,
   }
 
   UdsContext *context;
-  int         result = getBaseContext(contextId, contextType, &context);
+  int result = getBaseContext(contextId, &context);
   if (result != UDS_SUCCESS) {
     return logErrorWithStringError(result, "getBaseContext() failed.");
   }
@@ -604,9 +452,7 @@ int getContextIndexStats(unsigned int   contextId,
 }
 
 /**********************************************************************/
-int getContextStats(unsigned int     contextId,
-                    ContextType      contextType,
-                    UdsContextStats *stats)
+int getContextStats(unsigned int contextId, UdsContextStats *stats)
 {
   if (stats == NULL) {
     return
@@ -615,7 +461,7 @@ int getContextStats(unsigned int     contextId,
   }
 
   UdsContext *context;
-  int         result = getBaseContext(contextId, contextType, &context);
+  int         result = getBaseContext(contextId, &context);
   if (result != UDS_SUCCESS) {
     return logWarningWithStringError(result, "getBaseContext() failed");
   }
@@ -650,12 +496,6 @@ static void collectStats(const UdsContext *context, UdsContextStats *stats)
   stats->densePostsFound      = counters->postsFoundDense;
   stats->sparsePostsFound     = counters->postsFoundSparse;
   stats->postsNotFound        = counters->postsNotFound;
-  stats->bytesFound           = counters->bytesFound;
-  stats->bytesNotFound        = counters->bytesNotFound;
-  stats->avgChunkFound        = safeDivide(stats->bytesFound,
-                                           counters->postsFoundData);
-  stats->avgChunkNotFound     = safeDivide(stats->bytesNotFound,
-                                           counters->postsNotFoundData);
   stats->updatesFound         = counters->updatesFound;
   stats->updatesNotFound      = counters->updatesNotFound;
   stats->deletionsFound       = counters->deletionsFound;
@@ -676,10 +516,10 @@ static void collectStats(const UdsContext *context, UdsContextStats *stats)
 }
 
 /**********************************************************************/
-int resetStats(unsigned int contextId, ContextType contextType)
+int resetStats(unsigned int contextId)
 {
   UdsContext  *context;
-  int          result = getBaseContext(contextId, contextType, &context);
+  int          result = getBaseContext(contextId, &context);
   if (result != UDS_SUCCESS) {
     return result;
   }
@@ -700,13 +540,12 @@ int resetStats(unsigned int contextId, ContextType contextType)
 }
 
 /**********************************************************************/
-int registerDedupeCallback(unsigned int           contextID,
-                           ContextType            contextType,
-                           IndexCallbackFunction *callbackFunction,
-                           void                  *callbackArgument)
+int registerDedupeCallback(unsigned int            contextID,
+                           UdsDedupeBlockCallback  callbackFunction,
+                           void                   *callbackArgument)
 {
   UdsContext *context;
-  int result = getBaseContext(contextID, contextType, &context);
+  int result = getBaseContext(contextID, &context);
   if (result != UDS_SUCCESS) {
     return result;
   }
@@ -716,7 +555,7 @@ int registerDedupeCallback(unsigned int           contextID,
   } else if (context->hasCallback) {
     result = UDS_CALLBACK_ALREADY_REGISTERED;
   } else {
-    context->callbackFunction = *callbackFunction;
+    context->callbackFunction = callbackFunction;
     context->callbackArgument = callbackArgument;
     context->hasCallback      = true;
   }

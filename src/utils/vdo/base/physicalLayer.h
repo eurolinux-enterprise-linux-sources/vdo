@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.5/src/c++/vdo/base/physicalLayer.h#1 $
+ * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/base/physicalLayer.h#1 $
  */
 
 #ifndef PHYSICAL_LAYER_H
@@ -29,13 +29,6 @@ static const CRC32Checksum INITIAL_CHECKSUM = 0xffffffff;
 enum {
   /* The size of a CRC-32 checksum */
   CHECKSUM_SIZE = sizeof(CRC32Checksum),
-
-  /*
-   * Time between heartbeats in usec.
-   * The default kernel configuration has a 4ms tick rate, so let's
-   * make this a multiple for accuracy.
-   */
-  HEARTBEAT_INTERVAL = 52000,
 };
 
 /**

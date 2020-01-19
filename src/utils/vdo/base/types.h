@@ -16,7 +16,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
  * 02110-1301, USA. 
  *
- * $Id: //eng/vdo-releases/magnesium-rhel7.5/src/c++/vdo/base/types.h#2 $
+ * $Id: //eng/vdo-releases/magnesium-rhel7.6/src/c++/vdo/base/types.h#1 $
  */
 
 #ifndef TYPES_H
@@ -45,11 +45,6 @@ typedef uint8_t CompressedFragmentCount;
  * A CRC-32 checksum
  **/
 typedef uint32_t CRC32Checksum;
-
-/**
- * A count of heart beats.
- **/
-typedef uint64_t HeartbeatCount;
 
 /**
  * A height within a tree.
